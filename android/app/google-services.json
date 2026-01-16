@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1083875306702",
+    "project_id": "test-ddda8",
+    "storage_bucket": "test-ddda8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1083875306702:android:04bb889bb141387777f49f",
+        "android_client_info": {
+          "package_name": "com.lovable.schoolkeeper"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3jGSOz3OB9uVTm9YLFLDqQUNWGbs09fo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

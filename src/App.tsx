@@ -17,6 +17,10 @@ import Overview from "./pages/Overview";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
+import TicketManagement from "./pages/TicketManagement";
+import Reports from "./pages/Reports";
+import AuditLog from "./pages/AuditLog";
+import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -61,6 +65,34 @@ const App = () => {
                   <AppLayout>
                     <ProtectedRoute requiredRoles={['admin']}>
                       <Admin />
+                    </ProtectedRoute>
+                  </AppLayout>
+                } />
+                <Route path="/tickets" element={
+                  <AppLayout>
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <TicketManagement />
+                    </ProtectedRoute>
+                  </AppLayout>
+                } />
+                <Route path="/reports" element={
+                  <AppLayout>
+                    <ProtectedRoute requiredRoles={['admin', 'leadership']}>
+                      <Reports />
+                    </ProtectedRoute>
+                  </AppLayout>
+                } />
+                <Route path="/audit-log" element={
+                  <AppLayout>
+                    <ProtectedRoute requiredRoles={['admin', 'leadership']}>
+                      <AuditLog />
+                    </ProtectedRoute>
+                  </AppLayout>
+                } />
+                <Route path="/settings" element={
+                  <AppLayout>
+                    <ProtectedRoute requiredRoles={['admin']}>
+                      <Settings />
                     </ProtectedRoute>
                   </AppLayout>
                 } />

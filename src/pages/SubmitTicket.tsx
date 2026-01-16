@@ -388,7 +388,7 @@ export default function SubmitTicket() {
       {step === 2 && (
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium mb-2 block flex items-center gap-2">
+            <label className="text-sm font-medium mb-2 flex items-center gap-2">
               <MapPin className="h-4 w-4" />
               Asukoht (kohustuslik)
             </label>
