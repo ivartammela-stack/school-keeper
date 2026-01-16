@@ -12,6 +12,7 @@ import MyTickets from "./pages/MyTickets";
 import Work from "./pages/Work";
 import Safety from "./pages/Safety";
 import Overview from "./pages/Overview";
+import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,13 @@ const App = () => (
               <AppLayout>
                 <ProtectedRoute requiredRoles={['admin', 'leadership']}>
                   <Overview />
+                </ProtectedRoute>
+              </AppLayout>
+            } />
+            <Route path="/admin" element={
+              <AppLayout>
+                <ProtectedRoute requiredRoles={['admin']}>
+                  <Admin />
                 </ProtectedRoute>
               </AppLayout>
             } />
