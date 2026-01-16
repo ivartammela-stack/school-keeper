@@ -4,10 +4,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { toast } from 'sonner';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Trash2 } from 'lucide-react';
 
 type Ticket = {
   id: string;
@@ -18,6 +19,7 @@ type Ticket = {
   resolved_at: string | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
+  images: string[] | null;
 };
 
 const statusLabels: Record<string, string> = {
@@ -40,6 +42,7 @@ export default function Safety() {
   const { hasRole } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingTicket, setDeletingTicket] = useState<string | null>(null);
 
   const isSafetyOfficer = hasRole('safety_officer');
   const isAdmin = hasRole('admin');
@@ -58,6 +61,7 @@ export default function Safety() {
         status,
         created_at,
         resolved_at,
+        images,
         categories (name),
         problem_types (name)
       `)
@@ -101,6 +105,29 @@ export default function Safety() {
     } else {
       toast.success('Ohutusteade suletud');
       fetchTickets();
+    }
+  };
+
+  const deleteTicket = async (ticket: Ticket) => {
+    setDeletingTicket(ticket.id);
+    try {
+      if (ticket.images && ticket.images.length > 0) {
+        await supabase.storage.from('ticket-images').remove(ticket.images);
+      }
+
+      const { error } = await supabase
+        .from('tickets')
+        .delete()
+        .eq('id', ticket.id);
+
+      if (error) {
+        toast.error('Teate kustutamine ebaõnnestus');
+      } else {
+        toast.success('Teade kustutatud');
+        fetchTickets();
+      }
+    } finally {
+      setDeletingTicket(null);
     }
   };
 
@@ -155,6 +182,38 @@ export default function Safety() {
                     <Button size="sm" onClick={() => closeTicket(ticket.id)}>
                       Sulge
                     </Button>
+                  )}
+                  {isAdmin && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          disabled={deletingTicket === ticket.id}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Kustuta
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Kustuta teade #{ticket.ticket_number}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Kas oled kindel, et soovid selle teate lõplikult kustutada? 
+                            See tegevus on pöördumatu.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Tühista</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => deleteTicket(ticket)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Kustuta lõplikult
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                 </div>
               </CardContent>
