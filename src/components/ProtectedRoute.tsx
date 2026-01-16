@@ -15,7 +15,7 @@ export function ProtectedRoute({
   requiredRoles,
   redirectTo = '/' 
 }: ProtectedRouteProps) {
-  const { hasAnyRole, loading } = useAuth();
+  const { hasAnyRole, loading, isDemo } = useAuth();
   
   if (loading) {
     return (
@@ -23,6 +23,11 @@ export function ProtectedRoute({
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
       </div>
     );
+  }
+  
+  // Allow all access in demo mode
+  if (isDemo) {
+    return <>{children}</>;
   }
   
   if (!hasAnyRole(requiredRoles)) {
