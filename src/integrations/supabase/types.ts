@@ -23,7 +23,7 @@ export type Database = {
           new_status: Database["public"]["Enums"]["ticket_status"] | null
           old_status: Database["public"]["Enums"]["ticket_status"] | null
           ticket_id: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           action: string
@@ -33,7 +33,7 @@ export type Database = {
           new_status?: Database["public"]["Enums"]["ticket_status"] | null
           old_status?: Database["public"]["Enums"]["ticket_status"] | null
           ticket_id: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           action?: string
@@ -43,7 +43,7 @@ export type Database = {
           new_status?: Database["public"]["Enums"]["ticket_status"] | null
           old_status?: Database["public"]["Enums"]["ticket_status"] | null
           ticket_id?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -189,7 +189,7 @@ export type Database = {
           id: string
           images: string[] | null
           ticket_id: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           content: string
@@ -197,7 +197,7 @@ export type Database = {
           id?: string
           images?: string[] | null
           ticket_id: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           content?: string
@@ -205,7 +205,7 @@ export type Database = {
           id?: string
           images?: string[] | null
           ticket_id?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -223,7 +223,7 @@ export type Database = {
           category_id: string
           closed_at: string | null
           created_at: string
-          created_by: string
+          created_by: string | null
           description: string | null
           duplicate_of: string | null
           duplicate_reason: string | null
@@ -245,7 +245,7 @@ export type Database = {
           category_id: string
           closed_at?: string | null
           created_at?: string
-          created_by: string
+          created_by?: string | null
           description?: string | null
           duplicate_of?: string | null
           duplicate_reason?: string | null
@@ -267,7 +267,7 @@ export type Database = {
           category_id?: string
           closed_at?: string | null
           created_at?: string
-          created_by?: string
+          created_by?: string | null
           description?: string | null
           duplicate_of?: string | null
           duplicate_reason?: string | null
