@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { logger } from '@/lib/logger';
 
 // DEMO MODE - set to false to enable real authentication
-const DEMO_MODE = true;
+const DEMO_MODE = false;
 
 type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
 
