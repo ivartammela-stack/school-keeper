@@ -7,8 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Users, Shield, School, Check, X, Plus, Pencil, Trash2 } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Users, Shield, School, Check, X, Plus, Pencil, Trash2, UserX } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/hooks/useAuth';
 
 type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
 
@@ -44,9 +46,11 @@ const roleColors: Record<AppRole, string> = {
 };
 
 export default function Admin() {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [schools, setSchools] = useState<SchoolData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   
   // School form state
   const [schoolDialogOpen, setSchoolDialogOpen] = useState(false);
@@ -235,6 +239,35 @@ export default function Admin() {
     fetchData();
   };
 
+  const deleteUser = async (userId: string) => {
+    setDeletingUserId(userId);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Pole sisse logitud');
+        return;
+      }
+
+      const response = await supabase.functions.invoke('delete-user', {
+        body: { userId }
+      });
+
+      if (response.error) {
+        toast.error(response.error.message || 'Viga kasutaja kustutamisel');
+        return;
+      }
+
+      toast.success('Kasutaja kustutatud');
+      fetchData();
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast.error('Viga kasutaja kustutamisel');
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -264,9 +297,41 @@ export default function Admin() {
             {pendingUsers.map(user => (
               <div key={user.id} className="border rounded-lg p-3 bg-yellow-50 dark:bg-yellow-900/20">
                 <div className="flex flex-col gap-2">
-                  <div>
-                    <p className="font-medium">{user.full_name || 'Nimetu'}</p>
-                    <p className="text-sm text-muted-foreground">{user.email}</p>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium">{user.full_name || 'Nimetu'}</p>
+                      <p className="text-sm text-muted-foreground">{user.email}</p>
+                    </div>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive h-8 w-8"
+                          disabled={deletingUserId === user.id}
+                        >
+                          <UserX className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Kustuta kasutaja</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Kas oled kindel, et soovid kustutada kasutaja <strong>{user.full_name || user.email}</strong>? 
+                            See tegevus on pöördumatu.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Tühista</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => deleteUser(user.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Kustuta
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {ROLES.map(role => (
@@ -303,9 +368,43 @@ export default function Admin() {
             {activeUsers.map(user => (
               <div key={user.id} className="border rounded-lg p-4">
                 <div className="flex flex-col gap-3">
-                  <div>
-                    <p className="font-medium">{user.full_name || 'Nimetu'}</p>
-                    <p className="text-sm text-muted-foreground">{user.email}</p>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium">{user.full_name || 'Nimetu'}</p>
+                      <p className="text-sm text-muted-foreground">{user.email}</p>
+                    </div>
+                    {user.id !== currentUser?.id && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="text-destructive hover:text-destructive"
+                            disabled={deletingUserId === user.id}
+                          >
+                            <UserX className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Kustuta kasutaja</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Kas oled kindel, et soovid kustutada kasutaja <strong>{user.full_name || user.email}</strong>? 
+                              See tegevus on pöördumatu ja eemaldab kõik kasutaja andmed.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Tühista</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => deleteUser(user.id)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Kustuta
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
                   </div>
                   
                   {/* Current Roles */}
