@@ -174,19 +174,43 @@ export default function Work() {
 
                 {/* Actions */}
                 <div className="flex gap-2 flex-wrap">
-                  {ticket.status === 'submitted' && isMaintenance && !ticket.assigned_to && (
+                  {/* Võta töösse - näita kui staatus submitted ja pole kellelegi määratud */}
+                  {ticket.status === 'submitted' && !ticket.assigned_to && (isMaintenance || isAdmin) && (
                     <Button size="sm" onClick={() => assignToMe(ticket.id)}>
                       Võta töösse
                     </Button>
                   )}
+                  
+                  {/* Pane töösse - näita kui staatus submitted aga juba määratud */}
+                  {ticket.status === 'submitted' && ticket.assigned_to && isAdmin && (
+                    <Button size="sm" variant="outline" onClick={() => updateStatus(ticket.id, 'in_progress')}>
+                      Pane töösse
+                    </Button>
+                  )}
+                  
+                  {/* Märgi lahendatuks */}
                   {ticket.status === 'in_progress' && (isMaintenance || isAdmin) && (
                     <Button size="sm" onClick={() => updateStatus(ticket.id, 'resolved')}>
                       Märgi lahendatuks
                     </Button>
                   )}
+                  
+                  {/* Sulge - admin saab sulgeda resolved staatusega piletid */}
                   {ticket.status === 'resolved' && isAdmin && !ticket.is_safety_related && (
                     <Button size="sm" onClick={() => updateStatus(ticket.id, 'closed')}>
                       Sulge
+                    </Button>
+                  )}
+                  
+                  {/* Admin saab staatust tagasi muuta */}
+                  {isAdmin && ticket.status !== 'submitted' && (
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={() => updateStatus(ticket.id, 'submitted')}
+                      className="text-muted-foreground"
+                    >
+                      Taasta esitatud
                     </Button>
                   )}
                 </div>
