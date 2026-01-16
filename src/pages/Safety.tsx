@@ -18,7 +18,6 @@ type Ticket = {
   resolved_at: string | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
-  profiles: { full_name: string } | null;
 };
 
 const statusLabels: Record<string, string> = {
@@ -60,8 +59,7 @@ export default function Safety() {
         created_at,
         resolved_at,
         categories (name),
-        problem_types (name),
-        profiles:created_by (full_name)
+        problem_types (name)
       `)
       .eq('is_safety_related', true)
       .order('created_at', { ascending: false });
