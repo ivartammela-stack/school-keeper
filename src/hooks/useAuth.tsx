@@ -27,8 +27,8 @@ interface AuthContextType {
   session: Session | null;
   roles: AppRole[];
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signInWithMicrosoft: () => Promise<void>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   hasRole: (role: AppRole) => boolean;
   hasAnyRole: (roles: AppRole[]) => boolean;
@@ -94,23 +94,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle = async () => {
+  const signUp = async (email: string, password: string, fullName: string) => {
     const redirectUrl = `${window.location.origin}/`;
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: redirectUrl }
-    });
-  };
-
-  const signInWithMicrosoft = async () => {
-    const redirectUrl = `${window.location.origin}/`;
-    await supabase.auth.signInWithOAuth({
-      provider: 'azure',
-      options: { 
-        redirectTo: redirectUrl,
-        scopes: 'email profile openid'
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: redirectUrl,
+        data: {
+          full_name: fullName,
+        }
       }
     });
+    return { error: error as Error | null };
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    return { error: error as Error | null };
   };
 
   const signOut = async () => {
@@ -127,8 +131,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       roles,
       loading,
-      signInWithGoogle,
-      signInWithMicrosoft,
+      signUp,
+      signIn,
       signOut,
       hasRole,
       hasAnyRole,
