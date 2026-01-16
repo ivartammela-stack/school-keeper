@@ -2,8 +2,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "@/hooks/useAuth";
+import { AppLayout } from "@/components/layout/AppLayout";
+import Auth from "./pages/Auth";
+import SubmitTicket from "./pages/SubmitTicket";
+import MyTickets from "./pages/MyTickets";
+import Work from "./pages/Work";
+import Safety from "./pages/Safety";
+import Overview from "./pages/Overview";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -14,11 +21,18 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/" element={<Navigate to="/submit" replace />} />
+            <Route path="/submit" element={<AppLayout><SubmitTicket /></AppLayout>} />
+            <Route path="/my-tickets" element={<AppLayout><MyTickets /></AppLayout>} />
+            <Route path="/work" element={<AppLayout><Work /></AppLayout>} />
+            <Route path="/safety" element={<AppLayout><Safety /></AppLayout>} />
+            <Route path="/overview" element={<AppLayout><Overview /></AppLayout>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
