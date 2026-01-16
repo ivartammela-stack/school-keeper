@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight, Camera, MapPin, AlertTriangle, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { logger } from '@/lib/logger';
 
 type Category = {
   id: string;
@@ -79,6 +80,17 @@ export default function SubmitTicket() {
   const checkDuplicates = async () => {
     if (!selectedProblem || !location.trim()) return;
 
+    // Validate location input
+    const cleanLocation = location.trim();
+    if (cleanLocation.length < 2 || cleanLocation.length > 200) {
+      return; // Silently skip invalid locations
+    }
+    
+    // Skip if location contains ILIKE wildcards to prevent pattern abuse
+    if (/[%_]/.test(cleanLocation)) {
+      return;
+    }
+
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -86,7 +98,7 @@ export default function SubmitTicket() {
       .from('tickets')
       .select('id, ticket_number, location, status, created_at')
       .eq('problem_type_id', selectedProblem.id)
-      .ilike('location_key', location.trim().toLowerCase())
+      .ilike('location_key', cleanLocation.toLowerCase())
       .in('status', ['submitted', 'in_progress'])
       .gte('created_at', sevenDaysAgo.toISOString());
 
@@ -132,8 +144,8 @@ export default function SubmitTicket() {
       toast.success('Teade edukalt esitatud!');
       navigate('/my-tickets');
     } catch (error) {
-      console.error('Error submitting ticket:', error);
-      toast.error('Teate esitamine ebaõnnestus');
+      logger.error('Failed to submit ticket', error);
+      toast.error('Teate esitamine ebaõnnestus. Palun proovi uuesti.');
     } finally {
       setSubmitting(false);
     }

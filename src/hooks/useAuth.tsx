@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { logger } from '@/lib/logger';
 
 type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
 
@@ -65,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       setRoles((data || []).map(r => r.role as AppRole));
     } catch (error) {
-      console.error('Error fetching roles:', error);
+      logger.error('Error fetching user roles', error);
       setRoles([]);
     }
   };

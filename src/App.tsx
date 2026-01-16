@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Auth from "./pages/Auth";
 import SubmitTicket from "./pages/SubmitTicket";
 import MyTickets from "./pages/MyTickets";
@@ -27,9 +28,27 @@ const App = () => (
             <Route path="/" element={<Navigate to="/submit" replace />} />
             <Route path="/submit" element={<AppLayout><SubmitTicket /></AppLayout>} />
             <Route path="/my-tickets" element={<AppLayout><MyTickets /></AppLayout>} />
-            <Route path="/work" element={<AppLayout><Work /></AppLayout>} />
-            <Route path="/safety" element={<AppLayout><Safety /></AppLayout>} />
-            <Route path="/overview" element={<AppLayout><Overview /></AppLayout>} />
+            <Route path="/work" element={
+              <AppLayout>
+                <ProtectedRoute requiredRoles={['admin', 'maintenance']}>
+                  <Work />
+                </ProtectedRoute>
+              </AppLayout>
+            } />
+            <Route path="/safety" element={
+              <AppLayout>
+                <ProtectedRoute requiredRoles={['admin', 'safety_officer']}>
+                  <Safety />
+                </ProtectedRoute>
+              </AppLayout>
+            } />
+            <Route path="/overview" element={
+              <AppLayout>
+                <ProtectedRoute requiredRoles={['admin', 'leadership']}>
+                  <Overview />
+                </ProtectedRoute>
+              </AppLayout>
+            } />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
