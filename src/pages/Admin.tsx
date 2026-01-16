@@ -3,8 +3,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, Shield, School, Check, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Users, Shield, School, Check, X, Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
@@ -44,6 +47,12 @@ export default function Admin() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [schools, setSchools] = useState<SchoolData[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // School form state
+  const [schoolDialogOpen, setSchoolDialogOpen] = useState(false);
+  const [editingSchool, setEditingSchool] = useState<SchoolData | null>(null);
+  const [schoolName, setSchoolName] = useState('');
+  const [schoolCode, setSchoolCode] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -137,6 +146,92 @@ export default function Admin() {
     }
     
     toast.success('Kool määratud');
+    fetchData();
+  };
+
+  const openSchoolDialog = (school?: SchoolData) => {
+    if (school) {
+      setEditingSchool(school);
+      setSchoolName(school.name);
+      setSchoolCode(school.code || '');
+    } else {
+      setEditingSchool(null);
+      setSchoolName('');
+      setSchoolCode('');
+    }
+    setSchoolDialogOpen(true);
+  };
+
+  const saveSchool = async () => {
+    if (!schoolName.trim()) {
+      toast.error('Kooli nimi on kohustuslik');
+      return;
+    }
+
+    if (editingSchool) {
+      // Update existing school
+      const { error } = await supabase
+        .from('schools')
+        .update({ 
+          name: schoolName.trim(), 
+          code: schoolCode.trim() || null 
+        })
+        .eq('id', editingSchool.id);
+
+      if (error) {
+        toast.error('Viga kooli uuendamisel');
+        console.error(error);
+        return;
+      }
+      toast.success('Kool uuendatud');
+    } else {
+      // Create new school
+      const { error } = await supabase
+        .from('schools')
+        .insert({ 
+          name: schoolName.trim(), 
+          code: schoolCode.trim() || null 
+        });
+
+      if (error) {
+        if (error.code === '23505') {
+          toast.error('Selle koodiga kool on juba olemas');
+        } else {
+          toast.error('Viga kooli lisamisel');
+        }
+        console.error(error);
+        return;
+      }
+      toast.success('Kool lisatud');
+    }
+
+    setSchoolDialogOpen(false);
+    setEditingSchool(null);
+    setSchoolName('');
+    setSchoolCode('');
+    fetchData();
+  };
+
+  const deleteSchool = async (schoolId: string) => {
+    // Check if school has users
+    const usersInSchool = users.filter(u => u.school_id === schoolId);
+    if (usersInSchool.length > 0) {
+      toast.error(`Ei saa kustutada - ${usersInSchool.length} kasutajat on sellesse kooli määratud`);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('schools')
+      .delete()
+      .eq('id', schoolId);
+
+    if (error) {
+      toast.error('Viga kooli kustutamisel');
+      console.error(error);
+      return;
+    }
+
+    toast.success('Kool kustutatud');
     fetchData();
   };
 
@@ -271,18 +366,93 @@ export default function Admin() {
 
       {/* Schools Management */}
       <Card className="p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <School className="h-5 w-5 text-blue-500" />
-          <h2 className="font-semibold">Koolid ({schools.length})</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <School className="h-5 w-5 text-blue-500" />
+            <h2 className="font-semibold">Koolid ({schools.length})</h2>
+          </div>
+          <Dialog open={schoolDialogOpen} onOpenChange={setSchoolDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" onClick={() => openSchoolDialog()}>
+                <Plus className="h-4 w-4 mr-1" />
+                Lisa kool
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {editingSchool ? 'Muuda kooli' : 'Lisa uus kool'}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="schoolName">Kooli nimi *</Label>
+                  <Input
+                    id="schoolName"
+                    value={schoolName}
+                    onChange={(e) => setSchoolName(e.target.value)}
+                    placeholder="nt. Tallinna Põhikool"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="schoolCode">Kooli kood</Label>
+                  <Input
+                    id="schoolCode"
+                    value={schoolCode}
+                    onChange={(e) => setSchoolCode(e.target.value)}
+                    placeholder="nt. TPK001"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setSchoolDialogOpen(false)}>
+                    Tühista
+                  </Button>
+                  <Button onClick={saveSchool}>
+                    {editingSchool ? 'Salvesta' : 'Lisa'}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
-        <div className="space-y-2">
-          {schools.map(school => (
-            <div key={school.id} className="flex items-center justify-between border rounded p-2">
-              <span>{school.name}</span>
-              <span className="text-sm text-muted-foreground">{school.code}</span>
-            </div>
-          ))}
-        </div>
+        
+        {schools.length === 0 ? (
+          <p className="text-muted-foreground text-center py-4">Pole koole lisatud</p>
+        ) : (
+          <div className="space-y-2">
+            {schools.map(school => {
+              const userCount = users.filter(u => u.school_id === school.id).length;
+              return (
+                <div key={school.id} className="flex items-center justify-between border rounded p-3">
+                  <div>
+                    <p className="font-medium">{school.name}</p>
+                    <div className="flex gap-2 text-sm text-muted-foreground">
+                      {school.code && <span>Kood: {school.code}</span>}
+                      <span>• {userCount} kasutajat</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button 
+                      size="icon" 
+                      variant="ghost"
+                      onClick={() => openSchoolDialog(school)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      size="icon" 
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => deleteSchool(school.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </div>
   );
