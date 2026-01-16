@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ChevronLeft, ChevronRight, Camera, MapPin, AlertTriangle, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Camera, MapPin, AlertTriangle, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
@@ -49,6 +49,8 @@ export default function SubmitTicket() {
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [duplicateReason, setDuplicateReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
 
   useEffect(() => {
     fetchCategories();
@@ -117,6 +119,29 @@ export default function SubmitTicket() {
     }
   };
 
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const remainingSlots = 3 - selectedImages.length;
+    const newFiles = files.slice(0, remainingSlots);
+    
+    if (newFiles.length === 0) return;
+    
+    setSelectedImages(prev => [...prev, ...newFiles]);
+    
+    newFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreviewUrls(prev => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+    setImagePreviewUrls(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (addToDuplicate?: string) => {
     if (!user || !selectedCategory || !selectedProblem || !location.trim()) return;
 
@@ -140,6 +165,33 @@ export default function SubmitTicket() {
         .single();
 
       if (error) throw error;
+
+      // Upload images if any
+      if (selectedImages.length > 0 && data) {
+        const uploadedImagePaths: string[] = [];
+        
+        for (const file of selectedImages) {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${data.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+          
+          const { error: uploadError } = await supabase.storage
+            .from('ticket-images')
+            .upload(fileName, file);
+          
+          if (!uploadError) {
+            uploadedImagePaths.push(fileName);
+          } else {
+            logger.error('Failed to upload image', uploadError);
+          }
+        }
+        
+        if (uploadedImagePaths.length > 0) {
+          await supabase
+            .from('tickets')
+            .update({ images: uploadedImagePaths })
+            .eq('id', data.id);
+        }
+      }
 
       toast.success('Teade edukalt esitatud!');
       navigate('/my-tickets');
@@ -282,10 +334,47 @@ export default function SubmitTicket() {
             />
           </div>
 
-          <Button variant="outline" className="w-full gap-2" disabled>
-            <Camera className="h-4 w-4" />
-            Lisa pilt (tuleb varsti)
-          </Button>
+          {/* Image previews */}
+          {imagePreviewUrls.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {imagePreviewUrls.map((url, index) => (
+                <div key={index} className="relative">
+                  <img 
+                    src={url} 
+                    alt={`Pilt ${index + 1}`} 
+                    className="w-full h-20 object-cover rounded-lg"
+                  />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon"
+                    className="absolute -top-2 -right-2 h-6 w-6"
+                    onClick={() => removeImage(index)}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add image button */}
+          {selectedImages.length < 3 && (
+            <label className="cursor-pointer">
+              <Button variant="outline" className="w-full gap-2 pointer-events-none">
+                <Camera className="h-4 w-4" />
+                Lisa pilt ({selectedImages.length}/3)
+              </Button>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                className="hidden"
+                onChange={handleImageSelect}
+              />
+            </label>
+          )}
         </div>
       )}
 
@@ -301,6 +390,21 @@ export default function SubmitTicket() {
               <p><span className="text-muted-foreground">Probleem:</span> {selectedProblem?.name}</p>
               <p><span className="text-muted-foreground">Asukoht:</span> {location}</p>
               {description && <p><span className="text-muted-foreground">Lisainfo:</span> {description}</p>}
+              {imagePreviewUrls.length > 0 && (
+                <div>
+                  <span className="text-muted-foreground">Pildid:</span>
+                  <div className="flex gap-2 mt-1">
+                    {imagePreviewUrls.map((url, index) => (
+                      <img 
+                        key={index}
+                        src={url} 
+                        alt={`Pilt ${index + 1}`}
+                        className="h-12 w-12 object-cover rounded"
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
