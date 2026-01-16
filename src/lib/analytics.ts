@@ -1,19 +1,15 @@
 import { logEvent as firebaseLogEvent } from 'firebase/analytics';
 import { analytics } from './firebase';
 import { Capacitor } from '@capacitor/core';
-import { FirebaseAnalytics } from '@capacitor-community/firebase-analytics';
 
 export async function logEvent(name: string, params?: Record<string, any>) {
   try {
-    if (Capacitor.isNativePlatform()) {
-      // Use native plugin for mobile
-      await FirebaseAnalytics.logEvent({
-        name,
-        params: params || {},
-      });
-    } else if (analytics) {
-      // Use web SDK
+    if (analytics) {
+      // Use web SDK (works on all platforms when Firebase is configured)
       firebaseLogEvent(analytics, name, params);
+    } else {
+      // Just log to console if Firebase not configured
+      console.log(`[Analytics] ${name}`, params);
     }
   } catch (error) {
     console.error('Analytics error:', error);
@@ -22,9 +18,7 @@ export async function logEvent(name: string, params?: Record<string, any>) {
 
 export async function setUserId(userId: string) {
   try {
-    if (Capacitor.isNativePlatform()) {
-      await FirebaseAnalytics.setUserId({ userId });
-    } else if (analytics) {
+    if (analytics) {
       const { setUserId: setUserIdWeb } = await import('firebase/analytics');
       setUserIdWeb(analytics, userId);
     }
@@ -35,12 +29,7 @@ export async function setUserId(userId: string) {
 
 export async function setUserProperty(name: string, value: string) {
   try {
-    if (Capacitor.isNativePlatform()) {
-      await FirebaseAnalytics.setUserProperty({
-        name,
-        value,
-      });
-    } else if (analytics) {
+    if (analytics) {
       const { setUserProperties } = await import('firebase/analytics');
       setUserProperties(analytics, { [name]: value });
     }
