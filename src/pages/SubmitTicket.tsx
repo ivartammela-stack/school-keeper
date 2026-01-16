@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,6 +12,19 @@ import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
 import { Capacitor } from '@capacitor/core';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+
+// Helper to convert base64 to blob URL (more memory efficient for mobile)
+const base64ToBlobUrl = (base64String: string, mimeType: string = 'image/jpeg'): { blobUrl: string; file: File } => {
+  const byteCharacters = atob(base64String);
+  const byteArray = new Uint8Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteArray[i] = byteCharacters.charCodeAt(i);
+  }
+  const blob = new Blob([byteArray], { type: mimeType });
+  const blobUrl = URL.createObjectURL(blob);
+  const file = new File([blob], `image-${Date.now()}.jpg`, { type: mimeType });
+  return { blobUrl, file };
+};
 
 type Category = {
   id: string;
@@ -53,6 +66,17 @@ export default function SubmitTicket() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
+
+  // Cleanup blob URLs when component unmounts or URLs change
+  useEffect(() => {
+    return () => {
+      imagePreviewUrls.forEach(url => {
+        if (url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, []);
 
   useEffect(() => {
     fetchCategories();
@@ -135,19 +159,12 @@ export default function SubmitTicket() {
       });
 
       if (image.base64String) {
-        const dataUrl = `data:image/jpeg;base64,${image.base64String}`;
-        setImagePreviewUrls(prev => [...prev, dataUrl]);
+        // Use blob URL instead of base64 for better mobile performance
+        const { blobUrl, file } = base64ToBlobUrl(image.base64String);
         
-        // Convert base64 to blob
-        const byteCharacters = atob(image.base64String);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: 'image/jpeg' });
-        const file = new File([blob], `image-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        console.log('Image captured, blob URL created:', blobUrl.substring(0, 50));
         
+        setImagePreviewUrls(prev => [...prev, blobUrl]);
         setSelectedImages(prev => [...prev, file]);
         toast.success('Pilt lisatud!');
       } else {
@@ -175,24 +192,26 @@ export default function SubmitTicket() {
     
     setSelectedImages(prev => [...prev, ...newFiles]);
     
+    // Use blob URLs for better performance
     newFiles.forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreviewUrls(prev => [...prev, reader.result as string]);
-      };
-      reader.onerror = () => {
-        toast.error('Pildi laadimine ebaõnnestus');
-      };
-      reader.readAsDataURL(file);
+      const blobUrl = URL.createObjectURL(file);
+      console.log('File selected, blob URL created:', blobUrl.substring(0, 50));
+      setImagePreviewUrls(prev => [...prev, blobUrl]);
     });
     
     e.target.value = '';
   };
 
-  const removeImage = (index: number) => {
+  const removeImage = useCallback((index: number) => {
+    // Revoke the blob URL to free memory
+    const urlToRemove = imagePreviewUrls[index];
+    if (urlToRemove?.startsWith('blob:')) {
+      URL.revokeObjectURL(urlToRemove);
+    }
+    
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
     setImagePreviewUrls(prev => prev.filter((_, i) => i !== index));
-  };
+  }, [imagePreviewUrls]);
 
   const handleSubmit = async (addToDuplicate?: string) => {
     if (!user || !selectedCategory || !selectedProblem || !location.trim()) return;
