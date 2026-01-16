@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { logger } from '@/lib/logger';
+import { initializePushNotifications, unregisterPushNotifications } from '@/lib/push-notifications';
 
 // DEMO MODE - set to false to enable real authentication
 const DEMO_MODE = false;
@@ -59,6 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (session?.user) {
           setTimeout(() => {
             fetchUserRoles(session.user.id);
+            // Initialize push notifications for logged in user
+            initializePushNotifications(session.user.id);
           }, 0);
         } else {
           setRoles([]);
@@ -72,6 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchUserRoles(session.user.id);
+        // Initialize push notifications for logged in user
+        initializePushNotifications(session.user.id);
       }
       setLoading(false);
     });
@@ -118,6 +123,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // Unregister push notifications before signing out
+    if (user) {
+      await unregisterPushNotifications(user.id);
+    }
     await supabase.auth.signOut();
     setRoles([]);
   };
