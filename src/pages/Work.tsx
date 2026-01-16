@@ -18,7 +18,6 @@ type Ticket = {
   assigned_to: string | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
-  profiles: { full_name: string } | null;
 };
 
 const statusLabels: Record<string, string> = {
@@ -62,8 +61,7 @@ export default function Work() {
         is_safety_related,
         assigned_to,
         categories (name),
-        problem_types (name),
-        profiles:created_by (full_name)
+        problem_types (name)
       `)
       .in('status', ['submitted', 'in_progress', 'resolved'])
       .order('created_at', { ascending: false });
@@ -167,7 +165,6 @@ export default function Work() {
                     <p className="text-sm text-muted-foreground">{ticket.location}</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       {format(new Date(ticket.created_at), 'd. MMM yyyy', { locale: et })}
-                      {ticket.profiles?.full_name && ` • ${ticket.profiles.full_name}`}
                     </p>
                   </div>
                   <Badge className={`${statusColors[ticket.status]} text-white shrink-0`}>
