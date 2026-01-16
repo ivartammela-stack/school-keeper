@@ -87,11 +87,6 @@ export default function SubmitTicket() {
     if (cleanLocation.length < 2 || cleanLocation.length > 200) {
       return; // Silently skip invalid locations
     }
-    
-    // Skip if location contains ILIKE wildcards to prevent pattern abuse
-    if (/[%_]/.test(cleanLocation)) {
-      return;
-    }
 
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -100,7 +95,7 @@ export default function SubmitTicket() {
       .from('tickets')
       .select('id, ticket_number, location, status, created_at')
       .eq('problem_type_id', selectedProblem.id)
-      .ilike('location_key', cleanLocation.toLowerCase())
+      .eq('location_key', cleanLocation.toLowerCase())
       .in('status', ['submitted', 'in_progress'])
       .gte('created_at', sevenDaysAgo.toISOString());
 
