@@ -4,9 +4,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { Image as ImageIcon, X } from 'lucide-react';
 
 type Ticket = {
   id: string;
@@ -16,6 +18,8 @@ type Ticket = {
   created_at: string;
   is_safety_related: boolean;
   assigned_to: string | null;
+  description: string | null;
+  images: string[] | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
 };
@@ -36,11 +40,18 @@ const statusColors: Record<string, string> = {
   closed: 'bg-gray-500',
 };
 
+const getImageUrl = (path: string) => {
+  const { data } = supabase.storage.from('ticket-images').getPublicUrl(path);
+  return data.publicUrl;
+};
+
 export default function Work() {
   const { user, hasRole } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const isAdmin = hasRole('admin');
   const isMaintenance = hasRole('maintenance');
@@ -60,6 +71,8 @@ export default function Work() {
         created_at,
         is_safety_related,
         assigned_to,
+        description,
+        images,
         categories (name),
         problem_types (name)
       `)
@@ -93,6 +106,7 @@ export default function Work() {
     } else {
       toast.success('Staatus muudetud');
       fetchTickets();
+      setSelectedTicket(null);
     }
   };
 
@@ -107,6 +121,7 @@ export default function Work() {
     } else {
       toast.success('Töö võetud');
       fetchTickets();
+      setSelectedTicket(null);
     }
   };
 
@@ -151,7 +166,11 @@ export default function Work() {
       ) : (
         <div className="space-y-3">
           {tickets.map((ticket) => (
-            <Card key={ticket.id}>
+            <Card 
+              key={ticket.id}
+              className="cursor-pointer hover:bg-muted/50 transition-colors"
+              onClick={() => setSelectedTicket(ticket)}
+            >
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
@@ -160,6 +179,12 @@ export default function Work() {
                       {ticket.is_safety_related && (
                         <Badge variant="destructive" className="text-xs">Ohutus</Badge>
                       )}
+                      {ticket.images && ticket.images.length > 0 && (
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <ImageIcon className="h-3 w-3" />
+                          <span className="text-xs">{ticket.images.length}</span>
+                        </div>
+                      )}
                     </div>
                     <p className="font-medium">{ticket.problem_types?.name}</p>
                     <p className="text-sm text-muted-foreground">{ticket.location}</p>
@@ -167,58 +192,145 @@ export default function Work() {
                       {format(new Date(ticket.created_at), 'd. MMM yyyy', { locale: et })}
                     </p>
                   </div>
+                  {/* Show first image thumbnail if exists */}
+                  {ticket.images && ticket.images.length > 0 && (
+                    <img 
+                      src={getImageUrl(ticket.images[0])} 
+                      alt="Pildi eelvaade"
+                      className="h-14 w-14 object-cover rounded-lg shrink-0"
+                    />
+                  )}
                   <Badge className={`${statusColors[ticket.status]} text-white shrink-0`}>
                     {statusLabels[ticket.status]}
                   </Badge>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 flex-wrap">
-                  {/* Võta töösse - näita kui staatus submitted ja pole kellelegi määratud */}
-                  {ticket.status === 'submitted' && !ticket.assigned_to && (isMaintenance || isAdmin) && (
-                    <Button size="sm" onClick={() => assignToMe(ticket.id)}>
-                      Võta töösse
-                    </Button>
-                  )}
-                  
-                  {/* Pane töösse - näita kui staatus submitted aga juba määratud */}
-                  {ticket.status === 'submitted' && ticket.assigned_to && isAdmin && (
-                    <Button size="sm" variant="outline" onClick={() => updateStatus(ticket.id, 'in_progress')}>
-                      Pane töösse
-                    </Button>
-                  )}
-                  
-                  {/* Märgi lahendatuks */}
-                  {ticket.status === 'in_progress' && (isMaintenance || isAdmin) && (
-                    <Button size="sm" onClick={() => updateStatus(ticket.id, 'resolved')}>
-                      Märgi lahendatuks
-                    </Button>
-                  )}
-                  
-                  {/* Sulge - admin saab sulgeda resolved staatusega piletid */}
-                  {ticket.status === 'resolved' && isAdmin && !ticket.is_safety_related && (
-                    <Button size="sm" onClick={() => updateStatus(ticket.id, 'closed')}>
-                      Sulge
-                    </Button>
-                  )}
-                  
-                  {/* Admin saab staatust tagasi muuta */}
-                  {isAdmin && ticket.status !== 'submitted' && (
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      onClick={() => updateStatus(ticket.id, 'submitted')}
-                      className="text-muted-foreground"
-                    >
-                      Taasta esitatud
-                    </Button>
-                  )}
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Ticket Detail Dialog */}
+      <Dialog open={!!selectedTicket} onOpenChange={(open) => !open && setSelectedTicket(null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          {selectedTicket && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <span>#{selectedTicket.ticket_number}</span>
+                  <Badge className={`${statusColors[selectedTicket.status]} text-white`}>
+                    {statusLabels[selectedTicket.status]}
+                  </Badge>
+                </DialogTitle>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Kategooria</p>
+                  <p className="font-medium">{selectedTicket.categories?.name}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Probleem</p>
+                  <p className="font-medium">{selectedTicket.problem_types?.name}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Asukoht</p>
+                  <p className="font-medium">{selectedTicket.location}</p>
+                </div>
+                
+                {selectedTicket.description && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Kirjeldus</p>
+                    <p>{selectedTicket.description}</p>
+                  </div>
+                )}
+                
+                <div>
+                  <p className="text-sm text-muted-foreground">Esitatud</p>
+                  <p>{format(new Date(selectedTicket.created_at), 'd. MMMM yyyy HH:mm', { locale: et })}</p>
+                </div>
+
+                {/* Images */}
+                {selectedTicket.images && selectedTicket.images.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2">Pildid</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {selectedTicket.images.map((image, index) => (
+                        <img 
+                          key={index}
+                          src={getImageUrl(image)} 
+                          alt={`Pilt ${index + 1}`}
+                          className="w-full aspect-square object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setSelectedImage(getImageUrl(image))}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2 flex-wrap pt-2 border-t">
+                  {selectedTicket.status === 'submitted' && !selectedTicket.assigned_to && (isMaintenance || isAdmin) && (
+                    <Button size="sm" onClick={() => assignToMe(selectedTicket.id)}>
+                      Võta töösse
+                    </Button>
+                  )}
+                  
+                  {selectedTicket.status === 'submitted' && selectedTicket.assigned_to && isAdmin && (
+                    <Button size="sm" variant="outline" onClick={() => updateStatus(selectedTicket.id, 'in_progress')}>
+                      Pane töösse
+                    </Button>
+                  )}
+                  
+                  {selectedTicket.status === 'in_progress' && (isMaintenance || isAdmin) && (
+                    <Button size="sm" onClick={() => updateStatus(selectedTicket.id, 'resolved')}>
+                      Märgi lahendatuks
+                    </Button>
+                  )}
+                  
+                  {selectedTicket.status === 'resolved' && isAdmin && !selectedTicket.is_safety_related && (
+                    <Button size="sm" onClick={() => updateStatus(selectedTicket.id, 'closed')}>
+                      Sulge
+                    </Button>
+                  )}
+                  
+                  {isAdmin && selectedTicket.status !== 'submitted' && (
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={() => updateStatus(selectedTicket.id, 'submitted')}
+                      className="text-muted-foreground"
+                    >
+                      Taasta esitatud
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Full Image Viewer */}
+      <Dialog open={!!selectedImage} onOpenChange={(open) => !open && setSelectedImage(null)}>
+        <DialogContent className="max-w-4xl p-0 bg-black/90 border-none">
+          <button 
+            onClick={() => setSelectedImage(null)}
+            className="absolute top-2 right-2 z-10 p-2 bg-black/50 rounded-full text-white hover:bg-black/70"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {selectedImage && (
+            <img 
+              src={selectedImage} 
+              alt="Suur pilt"
+              className="w-full h-auto max-h-[90vh] object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
