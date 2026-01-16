@@ -2,6 +2,38 @@ import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications, Token, PushNotificationSchema, ActionPerformed } from '@capacitor/push-notifications';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+
+const registerTokenWithBackend = async (token: string, platform: 'android' | 'ios' | 'web') => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      console.log('No session, skipping token registration');
+      return;
+    }
+
+    const { data, error } = await supabase.functions.invoke('register-push-token', {
+      body: { token, platform },
+    });
+
+    if (error) {
+      console.error('Error registering push token with backend:', error);
+      return;
+    }
+
+    console.log('Push token registered with backend:', data);
+  } catch (error) {
+    console.error('Failed to register push token:', error);
+  }
+};
+
+const getPlatform = (): 'android' | 'ios' | 'web' => {
+  const platform = Capacitor.getPlatform();
+  if (platform === 'android') return 'android';
+  if (platform === 'ios') return 'ios';
+  return 'web';
+};
 
 export const usePushNotifications = () => {
   const [token, setToken] = useState<string | null>(null);
@@ -42,10 +74,13 @@ export const usePushNotifications = () => {
     // Add listeners
     const setupListeners = async () => {
       // On registration success
-      await PushNotifications.addListener('registration', (token: Token) => {
-        console.log('Push registration success, token:', token.value);
-        setToken(token.value);
-        // Here you would typically send this token to your backend
+      await PushNotifications.addListener('registration', async (tokenData: Token) => {
+        console.log('Push registration success, token:', tokenData.value);
+        setToken(tokenData.value);
+        
+        // Register token with backend
+        const platform = getPlatform();
+        await registerTokenWithBackend(tokenData.value, platform);
       });
 
       // On registration error
@@ -65,6 +100,11 @@ export const usePushNotifications = () => {
       await PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
         console.log('Push notification action performed:', action);
         // Handle navigation based on action.notification.data
+        const data = action.notification.data;
+        if (data?.ticketId) {
+          // Navigate to ticket - this will depend on your routing setup
+          window.location.href = `/my-tickets`;
+        }
       });
     };
 
