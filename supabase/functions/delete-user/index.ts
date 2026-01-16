@@ -78,18 +78,14 @@ Deno.serve(async (req) => {
 
     console.log(`Deleting user ${userId}...`);
 
-    // Check if user has any tickets
-    const { data: userTickets } = await adminClient
+    // Set created_by to NULL for user's tickets (preserve tickets)
+    const { error: ticketsError } = await adminClient
       .from('tickets')
-      .select('id')
+      .update({ created_by: null })
       .eq('created_by', userId);
 
-    if (userTickets && userTickets.length > 0) {
-      console.log(`User has ${userTickets.length} tickets - cannot delete`);
-      return new Response(
-        JSON.stringify({ error: `Kasutajal on ${userTickets.length} piletit. Kustutage esmalt piletid.` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (ticketsError) {
+      console.log('Error updating tickets created_by:', ticketsError);
     }
 
     // Remove user from assigned_to in tickets
@@ -102,24 +98,24 @@ Deno.serve(async (req) => {
       console.log('Error unassigning user from tickets:', unassignError);
     }
 
-    // Delete user's comments
+    // Set user_id to NULL for user's comments (preserve comments)
     const { error: commentsError } = await adminClient
       .from('ticket_comments')
-      .delete()
+      .update({ user_id: null })
       .eq('user_id', userId);
 
     if (commentsError) {
-      console.log('Error deleting comments:', commentsError);
+      console.log('Error updating comments user_id:', commentsError);
     }
 
-    // Delete user's audit log entries
+    // Set user_id to NULL for user's audit log entries (preserve audit log)
     const { error: auditError } = await adminClient
       .from('audit_log')
-      .delete()
+      .update({ user_id: null })
       .eq('user_id', userId);
 
     if (auditError) {
-      console.log('Error deleting audit logs:', auditError);
+      console.log('Error updating audit log user_id:', auditError);
     }
 
     // Delete user's roles
