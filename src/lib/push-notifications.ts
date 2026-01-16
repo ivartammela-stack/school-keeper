@@ -24,29 +24,34 @@ export async function initializePushNotifications(userId: string) {
 
     // On registration success, save token
     await PushNotifications.addListener('registration', async (token) => {
-      logger.info('Push registration success, token:', token.value);
+      logger.info(`Push registration success, token: ${token.value}`);
       
-      // Save token to database
+      // Save token to push_tokens table
+      const platform = Capacitor.getPlatform() as 'android' | 'ios' | 'web';
       await supabase
-        .from('profiles')
-        .update({ push_token: token.value })
-        .eq('id', userId);
+        .from('push_tokens')
+        .upsert({
+          user_id: userId,
+          token: token.value,
+          platform: platform,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,token' });
     });
 
     // On registration error
     await PushNotifications.addListener('registrationError', (error) => {
-      logger.error('Push registration error:', error);
+      logger.error(`Push registration error: ${JSON.stringify(error)}`);
     });
 
     // On notification received (app in foreground)
     await PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      logger.info('Push notification received:', notification);
+      logger.info(`Push notification received: ${JSON.stringify(notification)}`);
       // Show in-app notification if needed
     });
 
     // On notification tapped (opens app)
     await PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
-      logger.info('Push notification action performed:', notification);
+      logger.info(`Push notification action performed: ${JSON.stringify(notification)}`);
       // Navigate to relevant screen based on notification data
       const data = notification.notification.data;
       if (data?.ticket_id) {
@@ -64,11 +69,11 @@ export async function unregisterPushNotifications(userId: string) {
   if (!Capacitor.isNativePlatform()) return;
 
   try {
-    // Clear token from database
+    // Clear tokens from database
     await supabase
-      .from('profiles')
-      .update({ push_token: null })
-      .eq('id', userId);
+      .from('push_tokens')
+      .delete()
+      .eq('user_id', userId);
 
     // Unregister from FCM/APNs
     await PushNotifications.removeAllListeners();
