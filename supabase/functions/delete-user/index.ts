@@ -15,6 +15,7 @@ Deno.serve(async (req) => {
     // Get the authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
+      console.log('Missing authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -33,6 +34,7 @@ Deno.serve(async (req) => {
     // Get current user
     const { data: { user: currentUser }, error: userError } = await userClient.auth.getUser();
     if (userError || !currentUser) {
+      console.log('Unauthorized - no current user');
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -48,6 +50,7 @@ Deno.serve(async (req) => {
       .eq('role', 'admin');
 
     if (!roles || roles.length === 0) {
+      console.log('User is not admin');
       return new Response(
         JSON.stringify({ error: 'Only admins can delete users' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -57,6 +60,7 @@ Deno.serve(async (req) => {
     // Get user ID to delete from request body
     const { userId } = await req.json();
     if (!userId) {
+      console.log('User ID is required');
       return new Response(
         JSON.stringify({ error: 'User ID is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -65,34 +69,91 @@ Deno.serve(async (req) => {
 
     // Prevent self-deletion
     if (userId === currentUser.id) {
+      console.log('Cannot delete yourself');
       return new Response(
         JSON.stringify({ error: 'Cannot delete yourself' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Delete user's roles first
-    await adminClient
+    console.log(`Deleting user ${userId}...`);
+
+    // Check if user has any tickets
+    const { data: userTickets } = await adminClient
+      .from('tickets')
+      .select('id')
+      .eq('created_by', userId);
+
+    if (userTickets && userTickets.length > 0) {
+      console.log(`User has ${userTickets.length} tickets - cannot delete`);
+      return new Response(
+        JSON.stringify({ error: `Kasutajal on ${userTickets.length} piletit. Kustutage esmalt piletid.` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Remove user from assigned_to in tickets
+    const { error: unassignError } = await adminClient
+      .from('tickets')
+      .update({ assigned_to: null })
+      .eq('assigned_to', userId);
+
+    if (unassignError) {
+      console.log('Error unassigning user from tickets:', unassignError);
+    }
+
+    // Delete user's comments
+    const { error: commentsError } = await adminClient
+      .from('ticket_comments')
+      .delete()
+      .eq('user_id', userId);
+
+    if (commentsError) {
+      console.log('Error deleting comments:', commentsError);
+    }
+
+    // Delete user's audit log entries
+    const { error: auditError } = await adminClient
+      .from('audit_log')
+      .delete()
+      .eq('user_id', userId);
+
+    if (auditError) {
+      console.log('Error deleting audit logs:', auditError);
+    }
+
+    // Delete user's roles
+    const { error: rolesError } = await adminClient
       .from('user_roles')
       .delete()
       .eq('user_id', userId);
 
+    if (rolesError) {
+      console.log('Error deleting roles:', rolesError);
+    }
+
     // Delete user's profile
-    await adminClient
+    const { error: profileError } = await adminClient
       .from('profiles')
       .delete()
       .eq('id', userId);
+
+    if (profileError) {
+      console.log('Error deleting profile:', profileError);
+    }
 
     // Delete user from auth.users using admin API
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
 
     if (deleteError) {
-      console.error('Error deleting user:', deleteError);
+      console.error('Error deleting auth user:', deleteError);
       return new Response(
-        JSON.stringify({ error: 'Failed to delete user' }),
+        JSON.stringify({ error: 'Failed to delete user from auth' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log(`User ${userId} deleted successfully`);
 
     return new Response(
       JSON.stringify({ success: true }),
