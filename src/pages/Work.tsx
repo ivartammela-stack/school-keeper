@@ -5,10 +5,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { toast } from 'sonner';
-import { Image as ImageIcon, X } from 'lucide-react';
+import { Image as ImageIcon, X, Trash2 } from 'lucide-react';
 
 type Ticket = {
   id: string;
@@ -52,6 +53,7 @@ export default function Work() {
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [deletingTicket, setDeletingTicket] = useState(false);
 
   const isAdmin = hasRole('admin');
   const isMaintenance = hasRole('maintenance');
@@ -122,6 +124,39 @@ export default function Work() {
       toast.success('Töö võetud');
       fetchTickets();
       setSelectedTicket(null);
+    }
+  };
+
+  const deleteTicket = async (ticket: Ticket) => {
+    setDeletingTicket(true);
+    try {
+      // Delete images from storage first
+      if (ticket.images && ticket.images.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from('ticket-images')
+          .remove(ticket.images);
+        
+        if (storageError) {
+          console.error('Error deleting images:', storageError);
+        }
+      }
+
+      // Delete the ticket (cascade will handle audit_log and comments)
+      const { error } = await supabase
+        .from('tickets')
+        .delete()
+        .eq('id', ticket.id);
+
+      if (error) {
+        toast.error('Teate kustutamine ebaõnnestus');
+        console.error(error);
+      } else {
+        toast.success('Teade kustutatud');
+        fetchTickets();
+        setSelectedTicket(null);
+      }
+    } finally {
+      setDeletingTicket(false);
     }
   };
 
@@ -305,6 +340,40 @@ export default function Work() {
                     >
                       Taasta esitatud
                     </Button>
+                  )}
+
+                  {/* Delete button for admin */}
+                  {isAdmin && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          disabled={deletingTicket}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Kustuta
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Kustuta teade #{selectedTicket.ticket_number}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Kas oled kindel, et soovid selle teate lõplikult kustutada? 
+                            See tegevus on pöördumatu ja kustutab ka kõik seotud pildid.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Tühista</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => deleteTicket(selectedTicket)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Kustuta lõplikult
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                 </div>
               </div>
