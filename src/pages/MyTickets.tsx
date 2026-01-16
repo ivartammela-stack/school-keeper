@@ -7,7 +7,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { Image as ImageIcon, X } from 'lucide-react';
-import { logger } from '@/lib/logger';
 
 type Ticket = {
   id: string;
@@ -44,7 +43,6 @@ export default function MyTickets() {
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (user) {
@@ -52,51 +50,13 @@ export default function MyTickets() {
     }
   }, [user]);
 
-  // Load signed URLs for images
-  useEffect(() => {
-    const loadImageUrls = async () => {
-      const allImages: string[] = [];
-      tickets.forEach(ticket => {
-        if (ticket.images) {
-          console.log('Ticket images:', ticket.ticket_number, ticket.images);
-          allImages.push(...ticket.images);
-        }
-      });
-
-      const urls: Record<string, string> = {};
-      for (const imagePath of allImages) {
-        if (!imageUrls[imagePath]) {
-          try {
-            // Try signed URL first (works with private buckets)
-            const { data, error } = await supabase.storage
-              .from('ticket-images')
-              .createSignedUrl(imagePath, 3600);
-            
-            if (data && !error) {
-              urls[imagePath] = data.signedUrl;
-              console.log('Signed URL for', imagePath, ':', data.signedUrl);
-            } else {
-              console.error('Failed to create signed URL for', imagePath, error);
-            }
-          } catch (e) {
-            console.error('Exception getting image URL', e);
-            logger.error('Failed to get image URL', e);
-          }
-        }
-      }
-      
-      if (Object.keys(urls).length > 0) {
-        setImageUrls(prev => ({ ...prev, ...urls }));
-      }
-    };
-
-    if (tickets.length > 0) {
-      loadImageUrls();
-    }
-  }, [tickets]);
-
+  // Get public URL for image (bucket is now public)
   const getImageUrl = (path: string) => {
-    return imageUrls[path] || '';
+    if (!path) return '';
+    const { data } = supabase.storage
+      .from('ticket-images')
+      .getPublicUrl(path);
+    return data.publicUrl;
   };
 
   const fetchTickets = async () => {
@@ -171,7 +131,7 @@ export default function MyTickets() {
                     </p>
                   </div>
                   {/* Show first image thumbnail if exists */}
-                  {ticket.images && ticket.images.length > 0 && getImageUrl(ticket.images[0]) && (
+                  {ticket.images && ticket.images.length > 0 && (
                     <img 
                       src={getImageUrl(ticket.images[0])} 
                       alt="Pildi eelvaade"
