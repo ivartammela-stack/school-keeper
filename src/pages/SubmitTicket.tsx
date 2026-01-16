@@ -10,6 +10,8 @@ import { ChevronLeft, ChevronRight, Camera, MapPin, AlertTriangle, Check, X } fr
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
+import { Capacitor } from '@capacitor/core';
+import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 
 type Category = {
   id: string;
@@ -82,10 +84,9 @@ export default function SubmitTicket() {
   const checkDuplicates = async () => {
     if (!selectedProblem || !location.trim()) return;
 
-    // Validate location input
     const cleanLocation = location.trim();
     if (cleanLocation.length < 2 || cleanLocation.length > 200) {
-      return; // Silently skip invalid locations
+      return;
     }
 
     const sevenDaysAgo = new Date();
@@ -114,12 +115,63 @@ export default function SubmitTicket() {
     }
   };
 
+  const handleImageCapture = async () => {
+    if (selectedImages.length >= 3) {
+      toast.error('Saad lisada maksimaalselt 3 pilti');
+      return;
+    }
+
+    try {
+      toast.info('Avan kaamera...');
+      
+      const image = await CapCamera.getPhoto({
+        quality: 80,
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Prompt,
+        saveToGallery: false,
+        width: 1200,
+        height: 1200,
+      });
+
+      if (image.base64String) {
+        const dataUrl = `data:image/jpeg;base64,${image.base64String}`;
+        setImagePreviewUrls(prev => [...prev, dataUrl]);
+        
+        // Convert base64 to blob
+        const byteCharacters = atob(image.base64String);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'image/jpeg' });
+        const file = new File([blob], `image-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        
+        setSelectedImages(prev => [...prev, file]);
+        toast.success('Pilt lisatud!');
+      } else {
+        toast.error('Pilti ei saadud');
+      }
+    } catch (error: any) {
+      if (error.message?.includes('cancelled') || error.message?.includes('User cancelled')) {
+        // User cancelled - no error needed
+      } else {
+        logger.error('Image capture failed', error);
+        toast.error(`Pildi valimine ebaõnnestus: ${error.message || 'Tundmatu viga'}`);
+      }
+    }
+  };
+
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const remainingSlots = 3 - selectedImages.length;
     const newFiles = files.slice(0, remainingSlots);
     
-    if (newFiles.length === 0) return;
+    if (newFiles.length === 0) {
+      toast.error('Palun vali korrektne pilt');
+      return;
+    }
     
     setSelectedImages(prev => [...prev, ...newFiles]);
     
@@ -128,8 +180,13 @@ export default function SubmitTicket() {
       reader.onloadend = () => {
         setImagePreviewUrls(prev => [...prev, reader.result as string]);
       };
+      reader.onerror = () => {
+        toast.error('Pildi laadimine ebaõnnestus');
+      };
       reader.readAsDataURL(file);
     });
+    
+    e.target.value = '';
   };
 
   const removeImage = (index: number) => {
@@ -161,13 +218,14 @@ export default function SubmitTicket() {
 
       if (error) throw error;
 
-      // Upload images if any
       if (selectedImages.length > 0 && data) {
         const uploadedImagePaths: string[] = [];
+        console.log('Uploading', selectedImages.length, 'images for ticket', data.id);
         
         for (const file of selectedImages) {
           const fileExt = file.name.split('.').pop();
           const fileName = `${data.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+          console.log('Uploading file:', fileName, 'size:', file.size);
           
           const { error: uploadError } = await supabase.storage
             .from('ticket-images')
@@ -175,16 +233,26 @@ export default function SubmitTicket() {
           
           if (!uploadError) {
             uploadedImagePaths.push(fileName);
+            console.log('Upload success:', fileName);
           } else {
+            console.error('Upload error:', uploadError);
             logger.error('Failed to upload image', uploadError);
           }
         }
         
+        console.log('Uploaded paths:', uploadedImagePaths);
+        
         if (uploadedImagePaths.length > 0) {
-          await supabase
+          const { error: updateError } = await supabase
             .from('tickets')
             .update({ images: uploadedImagePaths })
             .eq('id', data.id);
+          
+          if (updateError) {
+            console.error('Failed to update ticket with images:', updateError);
+          } else {
+            console.log('Ticket updated with images');
+          }
         }
       }
 
@@ -218,12 +286,10 @@ export default function SubmitTicket() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">Uus teade</h1>
       </div>
 
-      {/* Progress */}
       <div className="flex gap-1">
         {STEPS.map((s, i) => (
           <div
@@ -239,7 +305,6 @@ export default function SubmitTicket() {
         Samm {step + 1}/{STEPS.length}: {STEPS[step]}
       </p>
 
-      {/* Step Content */}
       {step === 0 && (
         <div className="grid gap-3">
           {categories.map((cat) => (
@@ -329,7 +394,6 @@ export default function SubmitTicket() {
             />
           </div>
 
-          {/* Image previews */}
           {imagePreviewUrls.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
               {imagePreviewUrls.map((url, index) => (
@@ -353,29 +417,46 @@ export default function SubmitTicket() {
             </div>
           )}
 
-          {/* Add image button */}
           {selectedImages.length < 3 && (
-            <label className="cursor-pointer">
-              <Button variant="outline" className="w-full gap-2 pointer-events-none">
-                <Camera className="h-4 w-4" />
-                Lisa pilt ({selectedImages.length}/3)
-              </Button>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                multiple
-                className="hidden"
-                onChange={handleImageSelect}
-              />
-            </label>
+            <div>
+              {Capacitor.isNativePlatform() ? (
+                <Button 
+                  variant="outline" 
+                  className="w-full gap-2"
+                  type="button"
+                  onClick={handleImageCapture}
+                >
+                  <Camera className="h-4 w-4" />
+                  Lisa pilt ({selectedImages.length}/3)
+                </Button>
+              ) : (
+                <>
+                  <input
+                    id="image-upload"
+                    type="file"
+                    accept="image/*"
+                    multiple={selectedImages.length < 2}
+                    className="hidden"
+                    onChange={handleImageSelect}
+                  />
+                  <Button 
+                    variant="outline" 
+                    className="w-full gap-2"
+                    type="button"
+                    onClick={() => document.getElementById('image-upload')?.click()}
+                  >
+                    <Camera className="h-4 w-4" />
+                    Lisa pilt ({selectedImages.length}/3)
+                  </Button>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}
 
       {step === 3 && (
         <div className="space-y-4">
-          {/* Summary */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Teate kokkuvõte</CardTitle>
@@ -403,7 +484,6 @@ export default function SubmitTicket() {
             </CardContent>
           </Card>
 
-          {/* Duplicate Warning */}
           {showDuplicateWarning && duplicates.length > 0 && (
             <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
               <CardContent className="p-4 space-y-3">
@@ -436,7 +516,6 @@ export default function SubmitTicket() {
         </div>
       )}
 
-      {/* Navigation */}
       <div className="flex gap-3 pt-4">
         {step > 0 && (
           <Button variant="outline" onClick={prevStep} className="gap-1">

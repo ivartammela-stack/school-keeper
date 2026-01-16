@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { Image as ImageIcon, X } from 'lucide-react';
+import { logger } from '@/lib/logger';
 
 type Ticket = {
   id: string;
@@ -37,23 +38,66 @@ const statusColors: Record<string, string> = {
   closed: 'bg-gray-500',
 };
 
-const getImageUrl = (path: string) => {
-  const { data } = supabase.storage.from('ticket-images').getPublicUrl(path);
-  return data.publicUrl;
-};
-
 export default function MyTickets() {
   const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (user) {
       fetchTickets();
     }
   }, [user]);
+
+  // Load signed URLs for images
+  useEffect(() => {
+    const loadImageUrls = async () => {
+      const allImages: string[] = [];
+      tickets.forEach(ticket => {
+        if (ticket.images) {
+          console.log('Ticket images:', ticket.ticket_number, ticket.images);
+          allImages.push(...ticket.images);
+        }
+      });
+
+      const urls: Record<string, string> = {};
+      for (const imagePath of allImages) {
+        if (!imageUrls[imagePath]) {
+          try {
+            // Try signed URL first (works with private buckets)
+            const { data, error } = await supabase.storage
+              .from('ticket-images')
+              .createSignedUrl(imagePath, 3600);
+            
+            if (data && !error) {
+              urls[imagePath] = data.signedUrl;
+              console.log('Signed URL for', imagePath, ':', data.signedUrl);
+            } else {
+              console.error('Failed to create signed URL for', imagePath, error);
+            }
+          } catch (e) {
+            console.error('Exception getting image URL', e);
+            logger.error('Failed to get image URL', e);
+          }
+        }
+      }
+      
+      if (Object.keys(urls).length > 0) {
+        setImageUrls(prev => ({ ...prev, ...urls }));
+      }
+    };
+
+    if (tickets.length > 0) {
+      loadImageUrls();
+    }
+  }, [tickets]);
+
+  const getImageUrl = (path: string) => {
+    return imageUrls[path] || '';
+  };
 
   const fetchTickets = async () => {
     const { data, error } = await supabase
@@ -127,11 +171,12 @@ export default function MyTickets() {
                     </p>
                   </div>
                   {/* Show first image thumbnail if exists */}
-                  {ticket.images && ticket.images.length > 0 && (
+                  {ticket.images && ticket.images.length > 0 && getImageUrl(ticket.images[0]) && (
                     <img 
                       src={getImageUrl(ticket.images[0])} 
                       alt="Pildi eelvaade"
                       className="h-14 w-14 object-cover rounded-lg shrink-0"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     />
                   )}
                   <Badge className={`${statusColors[ticket.status]} text-white shrink-0`}>
@@ -191,15 +236,20 @@ export default function MyTickets() {
                   <div>
                     <p className="text-sm text-muted-foreground mb-2">Pildid</p>
                     <div className="grid grid-cols-3 gap-2">
-                      {selectedTicket.images.map((image, index) => (
-                        <img 
-                          key={index}
-                          src={getImageUrl(image)} 
-                          alt={`Pilt ${index + 1}`}
-                          className="w-full aspect-square object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                          onClick={() => setSelectedImage(getImageUrl(image))}
-                        />
-                      ))}
+                      {selectedTicket.images.map((image, index) => {
+                        const url = getImageUrl(image);
+                        if (!url) return null;
+                        return (
+                          <img 
+                            key={index}
+                            src={url} 
+                            alt={`Pilt ${index + 1}`}
+                            className="w-full aspect-square object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => setSelectedImage(url)}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}
