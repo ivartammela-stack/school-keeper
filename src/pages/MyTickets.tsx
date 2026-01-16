@@ -3,10 +3,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
-import { Image as ImageIcon, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { Image as ImageIcon, X, Trash2 } from 'lucide-react';
 
 type Ticket = {
   id: string;
@@ -38,11 +41,14 @@ const statusColors: Record<string, string> = {
 };
 
 export default function MyTickets() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [deletingTicket, setDeletingTicket] = useState(false);
+
+  const isAdmin = hasRole('admin');
 
   useEffect(() => {
     if (user) {
@@ -81,6 +87,30 @@ export default function MyTickets() {
       setTickets(data as Ticket[]);
     }
     setLoading(false);
+  };
+
+  const deleteTicket = async (ticket: Ticket) => {
+    setDeletingTicket(true);
+    try {
+      if (ticket.images && ticket.images.length > 0) {
+        await supabase.storage.from('ticket-images').remove(ticket.images);
+      }
+
+      const { error } = await supabase
+        .from('tickets')
+        .delete()
+        .eq('id', ticket.id);
+
+      if (error) {
+        toast.error('Teate kustutamine ebaõnnestus');
+      } else {
+        toast.success('Teade kustutatud');
+        fetchTickets();
+        setSelectedTicket(null);
+      }
+    } finally {
+      setDeletingTicket(false);
+    }
   };
 
   if (loading) {
@@ -211,6 +241,42 @@ export default function MyTickets() {
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {/* Admin Delete Button */}
+                {isAdmin && (
+                  <div className="pt-4 border-t">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          variant="destructive"
+                          className="w-full"
+                          disabled={deletingTicket}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Kustuta teade
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Kustuta teade #{selectedTicket.ticket_number}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Kas oled kindel, et soovid selle teate lõplikult kustutada? 
+                            See tegevus on pöördumatu.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Tühista</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => deleteTicket(selectedTicket)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Kustuta lõplikult
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 )}
               </div>
