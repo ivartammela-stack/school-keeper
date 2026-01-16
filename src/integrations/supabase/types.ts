@@ -130,6 +130,7 @@ export type Database = {
           email: string | null
           full_name: string | null
           id: string
+          school_id: string | null
           updated_at: string
         }
         Insert: {
@@ -138,6 +139,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id: string
+          school_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -146,7 +148,37 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          school_id?: string | null
           updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      schools: {
+        Row: {
+          code: string | null
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          code?: string | null
+          created_at?: string
+          id?: string
+          name?: string
         }
         Relationships: []
       }
