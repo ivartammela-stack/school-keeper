@@ -9,6 +9,9 @@ DROP POLICY IF EXISTS "Users can delete images from their tickets" ON storage.ob
 DROP POLICY IF EXISTS "Demo: anon can view ticket images" ON storage.objects;
 DROP POLICY IF EXISTS "Demo: anon can upload ticket images" ON storage.objects;
 DROP POLICY IF EXISTS "Demo: anon can delete ticket images" ON storage.objects;
+DROP POLICY IF EXISTS "Public read access for ticket images" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users can upload ticket images" ON storage.objects;
+DROP POLICY IF EXISTS "Users can delete their uploaded ticket images" ON storage.objects;
 
 -- Ensure bucket is public
 UPDATE storage.buckets
