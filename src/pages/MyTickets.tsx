@@ -15,6 +15,7 @@ type Ticket = {
   location: string;
   status: string;
   created_at: string;
+  created_by?: string | null;
   is_safety_related: boolean;
   description: string | null;
   images: string[] | null;
@@ -98,6 +99,7 @@ export default function MyTickets() {
   };
 
   const fetchTickets = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('tickets')
       .select(`
@@ -106,6 +108,7 @@ export default function MyTickets() {
         location,
         status,
         created_at,
+        created_by,
         is_safety_related,
         description,
         images,
@@ -116,10 +119,13 @@ export default function MyTickets() {
         resolved:profiles!tickets_resolved_by_fkey (full_name),
         closed:profiles!tickets_closed_by_fkey (full_name)
       `)
+      .eq('created_by', user.id)
       .order('created_at', { ascending: false });
 
     if (!error && data) {
       setTickets(data as unknown as Ticket[]);
+    } else if (error) {
+      logger.error('Failed to load tickets', error);
     }
     setLoading(false);
   };
