@@ -158,6 +158,24 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const internalSecret = Deno.env.get('PUSH_INTERNAL_SECRET');
+    if (!internalSecret) {
+      console.error('PUSH_INTERNAL_SECRET not configured');
+      return new Response(JSON.stringify({ error: 'Push service not configured' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const requestSecret = req.headers.get('x-internal-secret');
+    if (!requestSecret || requestSecret !== internalSecret) {
+      console.error('Missing or invalid internal secret');
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const { ticketId, notificationType }: NotificationPayload = await req.json();
     
     console.log(`Processing push notification for ticket ${ticketId}, type: ${notificationType}`);
@@ -174,7 +192,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const serviceAccount = JSON.parse(fcmServiceAccountJson) as ServiceAccount;
+    const serviceAccount = parseServiceAccountFromSecret(fcmServiceAccountJson);
     const accessToken = await getAccessToken(serviceAccount);
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);

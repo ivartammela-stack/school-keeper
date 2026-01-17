@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { DateRange } from 'react-day-picker';
-import { sendTicketNotification, TicketNotificationType } from '@/lib/push-notifications';
 
 import type { Database } from '@/integrations/supabase/types';
 
@@ -161,13 +160,6 @@ export function useBulkTicketUpdate() {
     return data.user?.id ?? null;
   };
 
-  const resolveNotificationType = (status: string): TicketNotificationType => {
-    if (status === 'resolved') return 'resolved';
-    if (status === 'verified') return 'verified';
-    if (status === 'closed') return 'closed';
-    return 'updated';
-  };
-
   const updateStatus = async (ticketIds: string[], newStatus: string) => {
     try {
       setLoading(true);
@@ -209,10 +201,6 @@ export function useBulkTicketUpdate() {
 
       if (updateError) throw updateError;
 
-      await Promise.all(
-        ticketIds.map((ticketId) => sendTicketNotification(ticketId, resolveNotificationType(newStatus)))
-      );
-
       return { success: true };
     } catch (err) {
       setError(err as Error);
@@ -233,10 +221,6 @@ export function useBulkTicketUpdate() {
       .in('id', ticketIds);
 
       if (updateError) throw updateError;
-
-      if (userId) {
-        await Promise.all(ticketIds.map((ticketId) => sendTicketNotification(ticketId, 'assigned')));
-      }
 
       return { success: true };
     } catch (err) {

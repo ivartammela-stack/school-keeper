@@ -1,10 +1,10 @@
-project_id = "tiiuggexuateqkqrxeoa"
+project_id = "iptfxneryygstdhjmayw"
 
 [functions.delete-user]
-verify_jwt = false
+verify_jwt = true
 
 [functions.send-push-notification]
 verify_jwt = false
 
 [functions.register-push-token]
-verify_jwt = false
+verify_jwt = true

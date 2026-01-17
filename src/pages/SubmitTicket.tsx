@@ -275,19 +275,6 @@ export default function SubmitTicket() {
         }
       }
 
-      if (data?.id) {
-        const { error: notifyError } = await supabase.functions.invoke('send-push-notification', {
-          body: {
-            ticketId: data.id,
-            notificationType: 'created',
-          },
-        });
-
-        if (notifyError) {
-          logger.warn('Failed to send push notification for ticket', notifyError);
-        }
-      }
-
       toast.success('Teade edukalt esitatud!');
       navigate('/my-tickets');
     } catch (error) {

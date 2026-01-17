@@ -98,7 +98,7 @@ export const usePushNotifications = () => {
     const setupListeners = async () => {
       // On registration success
       await PushNotifications.addListener('registration', async (tokenData: Token) => {
-        console.log('Push registration success, token:', tokenData.value);
+        console.log('Push registration success');
         setToken(tokenData.value);
         
         // Register token with backend

@@ -14,9 +14,9 @@ export async function setupStorage() {
     const bucketExists = buckets?.some(b => b.id === 'ticket-images');
     
     if (!bucketExists) {
-      // Create bucket as public
+      // Create bucket as private
       const { error: createError } = await supabase.storage.createBucket('ticket-images', {
-        public: true,
+        public: false,
         fileSizeLimit: 5242880, // 5MB
         allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
       });
@@ -28,9 +28,9 @@ export async function setupStorage() {
       
       logger.info('Storage bucket created successfully');
     } else {
-      // Update existing bucket to be public
+      // Update existing bucket to be private
       const { error: updateError } = await supabase.storage.updateBucket('ticket-images', {
-        public: true,
+        public: false,
         fileSizeLimit: 5242880,
         allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
       });
@@ -39,7 +39,7 @@ export async function setupStorage() {
         logger.error('Failed to update bucket', updateError);
         // Continue anyway, might not have permissions
       } else {
-        logger.info('Storage bucket updated to public');
+        logger.info('Storage bucket updated to private');
       }
     }
     

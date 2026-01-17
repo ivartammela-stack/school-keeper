@@ -3,22 +3,6 @@ import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/integrations/supabase/client';
 import { logger } from './logger';
 
-export type TicketNotificationType = 'created' | 'updated' | 'assigned' | 'resolved' | 'verified' | 'closed';
-
-export async function sendTicketNotification(ticketId: string, type: TicketNotificationType) {
-  try {
-    const { error } = await supabase.functions.invoke('send-push-notification', {
-      body: { ticketId, notificationType: type },
-    });
-
-    if (error) {
-      logger.warn('Failed to send ticket push notification', error);
-    }
-  } catch (error) {
-    logger.warn('Failed to send ticket push notification', error);
-  }
-}
-
 export async function initializePushNotifications(userId: string) {
   if (!Capacitor.isNativePlatform()) {
     logger.info('Push notifications only available on native platforms');
@@ -40,7 +24,7 @@ export async function initializePushNotifications(userId: string) {
 
     // On registration success, save token
     await PushNotifications.addListener('registration', async (token) => {
-      logger.info(`Push registration success, token: ${token.value}`);
+      logger.info('Push registration success');
       
       // Save token to push_tokens table
       const platform = Capacitor.getPlatform() as 'android' | 'ios' | 'web';

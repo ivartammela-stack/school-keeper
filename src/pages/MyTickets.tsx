@@ -56,13 +56,12 @@ export default function MyTickets() {
     }
   }, [user]);
 
-  // Load public URLs for images
+  // Load signed URLs for images
   useEffect(() => {
     const loadImageUrls = async () => {
       const allImages: string[] = [];
       tickets.forEach(ticket => {
         if (ticket.images) {
-          console.log('Ticket images:', ticket.ticket_number, ticket.images);
           allImages.push(...ticket.images);
         }
       });
@@ -71,19 +70,14 @@ export default function MyTickets() {
       for (const imagePath of allImages) {
         if (!imageUrls[imagePath]) {
           try {
-            // Use public URL (bucket is public)
-            const { data } = supabase.storage
+            const { data, error } = await supabase.storage
               .from('ticket-images')
-              .getPublicUrl(imagePath);
+              .createSignedUrl(imagePath, 60 * 60);
 
-            if (data) {
-              urls[imagePath] = data.publicUrl;
-              console.log('Public URL for', imagePath, ':', data.publicUrl);
-            } else {
-              console.error('Failed to get public URL for', imagePath);
+            if (!error && data?.signedUrl) {
+              urls[imagePath] = data.signedUrl;
             }
           } catch (e) {
-            console.error('Exception getting image URL', e);
             logger.error('Failed to get image URL', e);
           }
         }
@@ -97,7 +91,7 @@ export default function MyTickets() {
     if (tickets.length > 0) {
       loadImageUrls();
     }
-  }, [tickets]);
+  }, [tickets, imageUrls]);
 
   const getImageUrl = (path: string) => {
     return imageUrls[path] || '';

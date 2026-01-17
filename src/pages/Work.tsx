@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { sendTicketNotification } from '@/lib/push-notifications';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -46,11 +45,6 @@ const statusColors: Record<string, string> = {
   closed: 'bg-gray-500',
 };
 
-const getImageUrl = (path: string) => {
-  const { data } = supabase.storage.from('ticket-images').getPublicUrl(path);
-  return data.publicUrl;
-};
-
 export default function Work() {
   const { user, hasRole } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -58,6 +52,7 @@ export default function Work() {
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [deletingTicket, setDeletingTicket] = useState(false);
 
   const isAdmin = hasRole('admin');
@@ -66,6 +61,40 @@ export default function Work() {
   useEffect(() => {
     fetchTickets();
   }, [filter]);
+
+  useEffect(() => {
+    const loadImageUrls = async () => {
+      const allImages: string[] = [];
+      tickets.forEach(ticket => {
+        if (ticket.images) {
+          allImages.push(...ticket.images);
+        }
+      });
+
+      const urls: Record<string, string> = {};
+      for (const imagePath of allImages) {
+        if (!imageUrls[imagePath]) {
+          const { data, error } = await supabase.storage
+            .from('ticket-images')
+            .createSignedUrl(imagePath, 60 * 60);
+
+          if (!error && data?.signedUrl) {
+            urls[imagePath] = data.signedUrl;
+          }
+        }
+      }
+
+      if (Object.keys(urls).length > 0) {
+        setImageUrls(prev => ({ ...prev, ...urls }));
+      }
+    };
+
+    if (tickets.length > 0) {
+      loadImageUrls();
+    }
+  }, [tickets, imageUrls]);
+
+  const getImageUrl = (path: string) => imageUrls[path] || '';
 
   const fetchTickets = async () => {
     let query = supabase
@@ -132,9 +161,6 @@ export default function Work() {
     if (error) {
       toast.error('Staatuse muutmine ebaõnnestus');
     } else {
-      const notificationType =
-        newStatus === 'resolved' ? 'resolved' : newStatus === 'closed' ? 'closed' : 'updated';
-      await sendTicketNotification(ticketId, notificationType);
       toast.success('Staatus muudetud');
       fetchTickets();
       setSelectedTicket(null);
@@ -156,7 +182,6 @@ export default function Work() {
     if (error) {
       toast.error('Määramine ebaõnnestus');
     } else {
-      await sendTicketNotification(ticketId, 'assigned');
       toast.success('Töö võetud');
       fetchTickets();
       setSelectedTicket(null);
