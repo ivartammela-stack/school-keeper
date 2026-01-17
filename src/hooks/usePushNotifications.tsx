@@ -40,6 +40,29 @@ export const usePushNotifications = () => {
   const [isSupported, setIsSupported] = useState(false);
 
   useEffect(() => {
+    if (!token) return;
+
+    const tryRegister = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await registerTokenWithBackend(token, getPlatform());
+      }
+    };
+
+    tryRegister();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        registerTokenWithBackend(token, getPlatform());
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [token]);
+
+  useEffect(() => {
     const isPushSupported = Capacitor.isNativePlatform();
     setIsSupported(isPushSupported);
 
