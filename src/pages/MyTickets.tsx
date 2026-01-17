@@ -117,15 +117,15 @@ export default function MyTickets() {
         images,
         categories (name),
         problem_types (name),
-        profiles:created_by (full_name),
-        assigned:assigned_to (full_name),
-        resolved:resolved_by (full_name),
-        closed:closed_by (full_name)
+        profiles:created_by!tickets_created_by_fkey (full_name),
+        assigned:assigned_to!tickets_assigned_to_fkey (full_name),
+        resolved:resolved_by!tickets_resolved_by_fkey (full_name),
+        closed:closed_by!tickets_closed_by_fkey (full_name)
       `)
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      setTickets(data as Ticket[]);
+      setTickets(data as unknown as Ticket[]);
     }
     setLoading(false);
   };
