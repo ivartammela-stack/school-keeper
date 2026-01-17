@@ -1,0 +1,12 @@
+{
+  "appId": "com.lovable.schoolkeeper",
+  "appName": "Kooli Hooldus",
+  "webDir": "dist",
+  "plugins": {
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#000000",
+      "overlay": true
+    }
+  }
+}

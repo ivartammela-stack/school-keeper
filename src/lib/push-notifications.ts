@@ -24,11 +24,16 @@ export async function initializePushNotifications(userId: string) {
 
     // On registration success, save token
     await PushNotifications.addListener('registration', async (token) => {
-      logger.info('Push registration success');
-      
+      logger.info(`Push registration success, token: ${token.value?.substring(0, 20)}...`);
+
+      if (!token.value) {
+        logger.error('Push token is empty!');
+        return;
+      }
+
       // Save token to push_tokens table
       const platform = Capacitor.getPlatform() as 'android' | 'ios' | 'web';
-      await supabase
+      const { error } = await supabase
         .from('push_tokens')
         .upsert({
           user_id: userId,
@@ -36,6 +41,12 @@ export async function initializePushNotifications(userId: string) {
           platform: platform,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id,token' });
+
+      if (error) {
+        logger.error(`Failed to save push token: ${error.message} (${error.code})`);
+      } else {
+        logger.info('Push token saved successfully');
+      }
     });
 
     // On registration error
@@ -60,7 +71,8 @@ export async function initializePushNotifications(userId: string) {
       }
     });
 
-  } catch (error) {
+  } catch (error: any) {
+    console.error('Push init error:', error?.message || error?.code || JSON.stringify(error));
     logger.error('Failed to initialize push notifications', error);
   }
 }

@@ -1,0 +1,10 @@
+{
+  "appId": "com.lovable.schoolkeeper",
+  "appName": "Kooli Hooldus",
+  "webDir": "dist",
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}
