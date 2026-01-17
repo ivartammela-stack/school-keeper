@@ -4,13 +4,13 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 
 const navItems = [
-  { path: '/submit', label: 'Teavita', icon: PlusCircle, roles: ['teacher', 'admin'] },
-  { path: '/my-tickets', label: 'Minu teated', icon: ClipboardList, roles: ['teacher', 'admin', 'maintenance', 'leadership', 'safety_officer'] },
-  { path: '/work', label: 'Tööd', icon: Wrench, roles: ['admin', 'maintenance'] },
+  { path: '/submit', label: 'Teavita', icon: PlusCircle, roles: ['teacher', 'safety_officer', 'director', 'worker', 'facility_manager', 'admin'] },
+  { path: '/my-tickets', label: 'Minu teated', icon: ClipboardList, roles: ['teacher', 'safety_officer', 'director', 'worker', 'facility_manager', 'admin'] },
+  { path: '/work', label: 'Tööd', icon: Wrench, roles: ['admin', 'worker', 'facility_manager'] },
   { path: '/safety', label: 'Ohutus', icon: ShieldAlert, roles: ['admin', 'safety_officer'] },
-  { path: '/overview', label: 'Ülevaade', icon: BarChart3, roles: ['admin', 'leadership'] },
+  { path: '/overview', label: 'Ülevaade', icon: BarChart3, roles: ['admin', 'director'] },
   { path: '/admin', label: 'Haldus', icon: Settings, roles: ['admin'] },
-  { path: '/profile', label: 'Profiil', icon: User, roles: ['teacher', 'admin', 'maintenance', 'leadership', 'safety_officer'] },
+  { path: '/profile', label: 'Profiil', icon: User, roles: ['teacher', 'safety_officer', 'director', 'worker', 'facility_manager', 'admin'] },
 ];
 
 export function BottomNav() {

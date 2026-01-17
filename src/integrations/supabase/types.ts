@@ -489,10 +489,11 @@ export type Database = {
     Enums: {
       app_role:
         | "teacher"
-        | "admin"
-        | "maintenance"
-        | "leadership"
         | "safety_officer"
+        | "director"
+        | "worker"
+        | "facility_manager"
+        | "admin"
       ticket_status:
         | "submitted"
         | "in_progress"
@@ -628,10 +629,11 @@ export const Constants = {
     Enums: {
       app_role: [
         "teacher",
-        "admin",
-        "maintenance",
-        "leadership",
         "safety_officer",
+        "director",
+        "worker",
+        "facility_manager",
+        "admin",
       ],
       ticket_status: [
         "submitted",

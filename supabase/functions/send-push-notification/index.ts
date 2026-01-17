@@ -224,7 +224,7 @@ Deno.serve(async (req) => {
     console.log('Ticket found:', ticket.ticket_number, 'Safety:', ticket.is_safety_related);
 
     // Determine target roles based on ticket type
-    let targetRoles: string[] = ['admin', 'maintenance'];
+    let targetRoles: string[] = ['admin', 'worker', 'facility_manager'];
     
     if (ticket.is_safety_related) {
       targetRoles.push('safety_officer');

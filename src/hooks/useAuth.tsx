@@ -7,10 +7,10 @@ import { initializePushNotifications, unregisterPushNotifications } from '@/lib/
 // DEMO MODE - set to false to enable real authentication
 const DEMO_MODE = false;
 
-type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
+type AppRole = 'teacher' | 'safety_officer' | 'director' | 'worker' | 'facility_manager' | 'admin';
 
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
-const DEMO_ROLES: AppRole[] = ['teacher', 'admin', 'maintenance', 'leadership', 'safety_officer'];
+const DEMO_ROLES: AppRole[] = ['teacher', 'safety_officer', 'director', 'worker', 'facility_manager', 'admin'];
 
 // Mock user object for demo mode
 const DEMO_USER = {

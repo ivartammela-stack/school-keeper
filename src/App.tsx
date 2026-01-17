@@ -42,7 +42,7 @@ const App = () => {
                 <Route path="/my-tickets" element={<AppLayout><MyTickets /></AppLayout>} />
                 <Route path="/work" element={
                   <AppLayout>
-                    <ProtectedRoute requiredRoles={['admin', 'maintenance']}>
+                    <ProtectedRoute requiredRoles={['admin', 'worker', 'facility_manager']}>
                       <Work />
                     </ProtectedRoute>
                   </AppLayout>
@@ -56,7 +56,7 @@ const App = () => {
                 } />
                 <Route path="/overview" element={
                   <AppLayout>
-                    <ProtectedRoute requiredRoles={['admin', 'leadership']}>
+                    <ProtectedRoute requiredRoles={['admin', 'director']}>
                       <Overview />
                     </ProtectedRoute>
                   </AppLayout>
@@ -77,14 +77,14 @@ const App = () => {
                 } />
                 <Route path="/reports" element={
                   <AppLayout>
-                    <ProtectedRoute requiredRoles={['admin', 'leadership']}>
+                    <ProtectedRoute requiredRoles={['admin', 'director']}>
                       <Reports />
                     </ProtectedRoute>
                   </AppLayout>
                 } />
                 <Route path="/audit-log" element={
                   <AppLayout>
-                    <ProtectedRoute requiredRoles={['admin', 'leadership']}>
+                    <ProtectedRoute requiredRoles={['admin', 'director']}>
                       <AuditLog />
                     </ProtectedRoute>
                   </AppLayout>

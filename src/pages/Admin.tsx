@@ -12,7 +12,7 @@ import { Users, Shield, School, Check, X, Plus, Pencil, Trash2, UserX } from 'lu
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 
-type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
+type AppRole = 'teacher' | 'safety_officer' | 'director' | 'worker' | 'facility_manager' | 'admin';
 
 interface UserProfile {
   id: string;
@@ -31,18 +31,20 @@ interface SchoolData {
 
 const ROLES: { value: AppRole; label: string }[] = [
   { value: 'teacher', label: 'Õpetaja' },
+  { value: 'safety_officer', label: 'Töökeskkonnavolinik' },
+  { value: 'director', label: 'Direktor' },
+  { value: 'worker', label: 'Töömees' },
+  { value: 'facility_manager', label: 'Majandusjuhataja' },
   { value: 'admin', label: 'Admin' },
-  { value: 'maintenance', label: 'Hooldus' },
-  { value: 'leadership', label: 'Juhtkond' },
-  { value: 'safety_officer', label: 'Ohutusametnik' },
 ];
 
 const roleColors: Record<AppRole, string> = {
   teacher: 'bg-blue-100 text-blue-800',
-  admin: 'bg-red-100 text-red-800',
-  maintenance: 'bg-yellow-100 text-yellow-800',
-  leadership: 'bg-purple-100 text-purple-800',
   safety_officer: 'bg-green-100 text-green-800',
+  director: 'bg-purple-100 text-purple-800',
+  worker: 'bg-yellow-100 text-yellow-800',
+  facility_manager: 'bg-orange-100 text-orange-800',
+  admin: 'bg-red-100 text-red-800',
 };
 
 export default function Admin() {

@@ -56,7 +56,9 @@ export default function Work() {
   const [deletingTicket, setDeletingTicket] = useState(false);
 
   const isAdmin = hasRole('admin');
-  const isMaintenance = hasRole('maintenance');
+  const isWorker = hasRole('worker');
+  const isFacilityManager = hasRole('facility_manager');
+  const canManageWork = isAdmin || isWorker || isFacilityManager;
 
   useEffect(() => {
     fetchTickets();
@@ -119,7 +121,7 @@ export default function Work() {
       .in('status', ['submitted', 'in_progress', 'resolved'])
       .order('created_at', { ascending: false });
 
-    if (filter === 'mine' && isMaintenance) {
+    if (filter === 'mine' && (isWorker || isFacilityManager)) {
       query = query.eq('assigned_to', user!.id);
     }
 
@@ -233,7 +235,7 @@ export default function Work() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Tööd</h1>
-        {isMaintenance && (
+        {canManageWork && (
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -393,7 +395,7 @@ export default function Work() {
 
                 {/* Actions */}
                 <div className="flex gap-2 flex-wrap pt-2 border-t">
-                  {selectedTicket.status === 'submitted' && !selectedTicket.assigned_to && (isMaintenance || isAdmin) && (
+                  {selectedTicket.status === 'submitted' && !selectedTicket.assigned_to && canManageWork && (
                     <Button size="sm" onClick={() => assignToMe(selectedTicket.id)}>
                       Võta töösse
                     </Button>

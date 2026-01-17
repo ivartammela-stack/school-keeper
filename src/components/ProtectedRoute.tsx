@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 
-type AppRole = 'teacher' | 'admin' | 'maintenance' | 'leadership' | 'safety_officer';
+type AppRole = 'teacher' | 'safety_officer' | 'director' | 'worker' | 'facility_manager' | 'admin';
 
 interface ProtectedRouteProps {
   children: ReactNode;
