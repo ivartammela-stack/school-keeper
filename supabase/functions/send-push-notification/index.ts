@@ -20,6 +20,43 @@ type ServiceAccount = {
   token_uri?: string;
 };
 
+const parseServiceAccountFromSecret = (raw: string): ServiceAccount => {
+  const trimmed = raw.trim();
+  const candidates: string[] = [trimmed];
+
+  // If the secret was pasted as a quoted JSON string, unwrap it.
+  try {
+    const unwrapped = JSON.parse(trimmed);
+    if (typeof unwrapped === 'string') candidates.unshift(unwrapped);
+  } catch {
+    // ignore
+  }
+
+  // If the secret looks like base64, try decoding.
+  if (!trimmed.startsWith('{') && /^[A-Za-z0-9+/=_-]+$/.test(trimmed) && trimmed.length > 100) {
+    try {
+      candidates.unshift(atob(trimmed));
+    } catch {
+      // ignore
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as Partial<ServiceAccount>;
+      if (parsed?.project_id && parsed?.client_email && parsed?.private_key) {
+        return parsed as ServiceAccount;
+      }
+    } catch {
+      // try next
+    }
+  }
+
+  throw new Error('Invalid FCM service account JSON in FCM_SERVICE_ACCOUNT_JSON');
+};
+
+type Jsonish = Record<string, unknown>;
+
 const base64UrlEncode = (input: string | ArrayBuffer) => {
   const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input);
   let binary = '';
@@ -96,8 +133,12 @@ const getAccessToken = async (serviceAccount: ServiceAccount) => {
     throw new Error(`Failed to get access token: ${response.status} ${errorText}`);
   }
 
-  const data = await response.json();
-  return data.access_token as string;
+  const data = (await response.json()) as Jsonish;
+  const accessToken = data?.access_token;
+  if (typeof accessToken !== 'string' || !accessToken) {
+    throw new Error('Failed to get access token: missing access_token in response');
+  }
+  return accessToken;
 };
 
 const isUnregisteredToken = (payload: any) => {
