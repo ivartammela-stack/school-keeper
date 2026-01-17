@@ -317,7 +317,7 @@ export default function SubmitTicket() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">Uus teade</h1>
       </div>

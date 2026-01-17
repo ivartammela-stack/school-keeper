@@ -122,7 +122,6 @@ export default function MyTickets() {
         resolved:resolved_by (full_name),
         closed:closed_by (full_name)
       `)
-      .eq('created_by', user!.id)
       .order('created_at', { ascending: false });
 
     if (!error && data) {
