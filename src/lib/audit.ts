@@ -43,19 +43,25 @@ export async function logAudit({
     // Get user agent and prepare audit data
     const userAgent = navigator.userAgent;
 
-    // Insert audit log
+    // Insert audit log - ticket_id is required, so we use entityId as ticket_id for ticket entities
+    // For non-ticket entities, we still need a valid ticket_id, so skip logging for now
+    if (entityType !== 'ticket') {
+      console.warn(`Audit logging skipped for non-ticket entity type: ${entityType}`);
+      return;
+    }
+
     const { error } = await supabase
       .from('audit_log')
       .insert({
+        ticket_id: entityId,
         user_id: user.id,
         action,
+        old_status: oldStatus as any,
+        new_status: newStatus as any,
+        details: details || {},
         entity_type: entityType,
         entity_id: entityId,
-        old_status: oldStatus,
-        new_status: newStatus,
-        details: details || {},
         user_agent: userAgent,
-        // IP address would need to be set by Edge Function or backend
       });
 
     if (error) {

@@ -3,6 +3,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { DateRange } from 'react-day-picker';
 import { sendTicketNotification, TicketNotificationType } from '@/lib/push-notifications';
 
+import type { Database } from '@/integrations/supabase/types';
+
+type TicketStatus = Database['public']['Enums']['ticket_status'];
+
 export interface TicketFilters {
   statuses?: string[];
   categoryId?: string;
@@ -60,17 +64,17 @@ export function useTickets(filters: TicketFilters = {}) {
           *,
           categories:category_id(name),
           problem_types:problem_type_id(name),
-          profiles:created_by(full_name),
-          assigned:assigned_to(full_name),
-          resolved:resolved_by(full_name),
-          closed:closed_by(full_name)
+          profiles:created_by!tickets_created_by_fkey(full_name),
+          assigned:assigned_to!tickets_assigned_to_fkey(full_name),
+          resolved:resolved_by!tickets_resolved_by_fkey(full_name),
+          closed:closed_by!tickets_closed_by_fkey(full_name)
         `,
           { count: 'exact' }
         );
 
       // Apply filters
       if (filters.statuses && filters.statuses.length > 0) {
-        query = query.in('status', filters.statuses);
+        query = query.in('status', filters.statuses as TicketStatus[]);
       }
 
       if (filters.categoryId) {
@@ -116,7 +120,7 @@ export function useTickets(filters: TicketFilters = {}) {
 
       if (fetchError) throw fetchError;
 
-      setTickets(data || []);
+      setTickets((data as unknown as Ticket[]) || []);
       setTotalCount(count || 0);
     } catch (err) {
       setError(err as Error);
