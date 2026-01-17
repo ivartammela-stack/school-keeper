@@ -25,6 +25,8 @@ export interface Ticket {
   priority: number;
   created_by: string;
   assigned_to: string | null;
+  resolved_by?: string | null;
+  closed_by?: string | null;
   is_safety_related: boolean;
   images: string[];
   created_at: string;
@@ -36,6 +38,8 @@ export interface Ticket {
   problem_types?: { name: string };
   profiles?: { full_name: string | null };
   assigned?: { full_name: string | null };
+  resolved?: { full_name: string | null };
+  closed?: { full_name: string | null };
 }
 
 export function useTickets(filters: TicketFilters = {}) {
@@ -57,7 +61,9 @@ export function useTickets(filters: TicketFilters = {}) {
           categories:category_id(name),
           problem_types:problem_type_id(name),
           profiles:created_by(full_name),
-          assigned:assigned_to(full_name)
+          assigned:assigned_to(full_name),
+          resolved:resolved_by(full_name),
+          closed:closed_by(full_name)
         `,
           { count: 'exact' }
         );
@@ -146,6 +152,11 @@ export function useBulkTicketUpdate() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const getCurrentUserId = async () => {
+    const { data } = await supabase.auth.getUser();
+    return data.user?.id ?? null;
+  };
+
   const resolveNotificationType = (status: string): TicketNotificationType => {
     if (status === 'resolved') return 'resolved';
     if (status === 'verified') return 'verified';
@@ -158,10 +169,39 @@ export function useBulkTicketUpdate() {
       setLoading(true);
       setError(null);
 
+      const userId = await getCurrentUserId();
+      const updates: Record<string, string | null> = {
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (newStatus === 'resolved') {
+        updates.resolved_at = new Date().toISOString();
+        updates.resolved_by = userId;
+      }
+
+      if (newStatus === 'verified') {
+        updates.verified_at = new Date().toISOString();
+      }
+
+      if (newStatus === 'closed') {
+        updates.closed_at = new Date().toISOString();
+        updates.closed_by = userId;
+      }
+
+      if (newStatus === 'submitted') {
+        updates.assigned_to = null;
+        updates.resolved_by = null;
+        updates.closed_by = null;
+        updates.resolved_at = null;
+        updates.verified_at = null;
+        updates.closed_at = null;
+      }
+
       const { error: updateError } = await supabase
         .from('tickets')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .in('id', ticketIds);
+        .update(updates)
+        .in('id', ticketIds);
 
       if (updateError) throw updateError;
 

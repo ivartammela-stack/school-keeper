@@ -24,6 +24,10 @@ type Ticket = {
   images: string[] | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
+  profiles?: { full_name: string | null } | null;
+  assigned?: { full_name: string | null } | null;
+  resolved?: { full_name: string | null } | null;
+  closed?: { full_name: string | null } | null;
 };
 
 const statusLabels: Record<string, string> = {
@@ -77,7 +81,11 @@ export default function Work() {
         description,
         images,
         categories (name),
-        problem_types (name)
+        problem_types (name),
+        profiles:created_by (full_name),
+        assigned:assigned_to (full_name),
+        resolved:resolved_by (full_name),
+        closed:closed_by (full_name)
       `)
       .in('status', ['submitted', 'in_progress', 'resolved'])
       .order('created_at', { ascending: false });
@@ -98,6 +106,23 @@ export default function Work() {
     const updates: any = { status: newStatus };
     if (newStatus === 'resolved') updates.resolved_at = new Date().toISOString();
     if (newStatus === 'closed') updates.closed_at = new Date().toISOString();
+    if (newStatus === 'resolved') updates.resolved_by = user?.id || null;
+    if (newStatus === 'closed') updates.closed_by = user?.id || null;
+    if (newStatus === 'submitted') {
+      updates.assigned_to = null;
+      updates.resolved_by = null;
+      updates.closed_by = null;
+      updates.resolved_at = null;
+      updates.closed_at = null;
+    }
+
+    if (newStatus === 'resolved' && !isAdmin) {
+      const ticket = tickets.find((t) => t.id === ticketId);
+      if (ticket?.assigned_to !== user?.id) {
+        toast.error('Ainult töö võtnud kasutaja saab lahendatuks märkida');
+        return;
+      }
+    }
 
     const { error } = await supabase
       .from('tickets')
@@ -117,6 +142,12 @@ export default function Work() {
   };
 
   const assignToMe = async (ticketId: string) => {
+    const ticket = tickets.find((t) => t.id === ticketId);
+    if (ticket?.assigned_to && !isAdmin) {
+      toast.error('See teade on juba töös');
+      return;
+    }
+
     const { error } = await supabase
       .from('tickets')
       .update({ assigned_to: user!.id, status: 'in_progress' })
@@ -228,6 +259,11 @@ export default function Work() {
                     </div>
                     <p className="font-medium">{ticket.problem_types?.name}</p>
                     <p className="text-sm text-muted-foreground">{ticket.location}</p>
+                    {ticket.assigned?.full_name && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Töös: {ticket.assigned.full_name}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground mt-1">
                       {format(new Date(ticket.created_at), 'd. MMM yyyy', { locale: et })}
                     </p>
@@ -292,6 +328,26 @@ export default function Work() {
                   <p>{format(new Date(selectedTicket.created_at), 'd. MMMM yyyy HH:mm', { locale: et })}</p>
                 </div>
 
+                <div>
+                  <p className="text-sm text-muted-foreground">Looja</p>
+                  <p>{selectedTicket.profiles?.full_name || '-'}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Töös</p>
+                  <p>{selectedTicket.assigned?.full_name || '-'}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Lahendas</p>
+                  <p>{selectedTicket.resolved?.full_name || '-'}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Sulges</p>
+                  <p>{selectedTicket.closed?.full_name || '-'}</p>
+                </div>
+
                 {/* Images */}
                 {selectedTicket.images && selectedTicket.images.length > 0 && (
                   <div>
@@ -324,7 +380,7 @@ export default function Work() {
                     </Button>
                   )}
                   
-                  {selectedTicket.status === 'in_progress' && (isMaintenance || isAdmin) && (
+                  {selectedTicket.status === 'in_progress' && (isAdmin || selectedTicket.assigned_to === user?.id) && (
                     <Button size="sm" onClick={() => updateStatus(selectedTicket.id, 'resolved')}>
                       Märgi lahendatuks
                     </Button>

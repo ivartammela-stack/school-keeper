@@ -18,9 +18,17 @@ type Ticket = {
   status: string;
   created_at: string;
   resolved_at: string | null;
+  created_by: string | null;
+  assigned_to: string | null;
+  resolved_by: string | null;
+  closed_by: string | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
   images: string[] | null;
+  profiles?: { full_name: string | null };
+  assigned?: { full_name: string | null };
+  resolved?: { full_name: string | null };
+  closed?: { full_name: string | null };
 };
 
 const statusLabels: Record<string, string> = {
@@ -40,7 +48,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function Safety() {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingTicket, setDeletingTicket] = useState<string | null>(null);
@@ -62,9 +70,17 @@ export default function Safety() {
         status,
         created_at,
         resolved_at,
+        created_by,
+        assigned_to,
+        resolved_by,
+        closed_by,
         images,
         categories (name),
-        problem_types (name)
+        problem_types (name),
+        profiles:created_by (full_name),
+        assigned:assigned_to (full_name),
+        resolved:resolved_by (full_name),
+        closed:closed_by (full_name)
       `)
       .eq('is_safety_related', true)
       .order('created_at', { ascending: false });
@@ -98,7 +114,8 @@ export default function Safety() {
       .from('tickets')
       .update({ 
         status: 'closed', 
-        closed_at: new Date().toISOString() 
+        closed_at: new Date().toISOString(),
+        closed_by: user?.id || null
       })
       .eq('id', ticketId);
 
@@ -168,6 +185,17 @@ export default function Safety() {
                     <p className="text-xs text-muted-foreground mt-1">
                       {format(new Date(ticket.created_at), 'd. MMM yyyy', { locale: et })}
                     </p>
+                    {(ticket.profiles?.full_name ||
+                      ticket.assigned?.full_name ||
+                      ticket.resolved?.full_name ||
+                      ticket.closed?.full_name) && (
+                      <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                        {ticket.profiles?.full_name && <p>Looja: {ticket.profiles.full_name}</p>}
+                        {ticket.assigned?.full_name && <p>Töös: {ticket.assigned.full_name}</p>}
+                        {ticket.resolved?.full_name && <p>Lahendas: {ticket.resolved.full_name}</p>}
+                        {ticket.closed?.full_name && <p>Sulges: {ticket.closed.full_name}</p>}
+                      </div>
+                    )}
                   </div>
                   <Badge className={`${statusColors[ticket.status]} text-white shrink-0`}>
                     {statusLabels[ticket.status]}

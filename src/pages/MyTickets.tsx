@@ -20,6 +20,10 @@ type Ticket = {
   images: string[] | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
+  profiles?: { full_name: string | null } | null;
+  assigned?: { full_name: string | null } | null;
+  resolved?: { full_name: string | null } | null;
+  closed?: { full_name: string | null } | null;
 };
 
 const statusLabels: Record<string, string> = {
@@ -112,7 +116,11 @@ export default function MyTickets() {
         description,
         images,
         categories (name),
-        problem_types (name)
+        problem_types (name),
+        profiles:created_by (full_name),
+        assigned:assigned_to (full_name),
+        resolved:resolved_by (full_name),
+        closed:closed_by (full_name)
       `)
       .eq('created_by', user!.id)
       .order('created_at', { ascending: false });
@@ -229,6 +237,26 @@ export default function MyTickets() {
                 <div>
                   <p className="text-sm text-muted-foreground">Esitatud</p>
                   <p>{format(new Date(selectedTicket.created_at), 'd. MMMM yyyy HH:mm', { locale: et })}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Looja</p>
+                  <p>{selectedTicket.profiles?.full_name || '-'}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Töös</p>
+                  <p>{selectedTicket.assigned?.full_name || '-'}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Lahendas</p>
+                  <p>{selectedTicket.resolved?.full_name || '-'}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-muted-foreground">Sulges</p>
+                  <p>{selectedTicket.closed?.full_name || '-'}</p>
                 </div>
 
                 {/* Images */}
