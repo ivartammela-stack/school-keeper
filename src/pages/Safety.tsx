@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { sendTicketNotification } from '@/lib/push-notifications';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -86,6 +87,7 @@ export default function Safety() {
     if (error) {
       toast.error('Kinnitamine ebaõnnestus');
     } else {
+      await sendTicketNotification(ticketId, 'verified');
       toast.success('Ohutusteade kinnitatud');
       fetchTickets();
     }
@@ -103,6 +105,7 @@ export default function Safety() {
     if (error) {
       toast.error('Sulgemine ebaõnnestus');
     } else {
+      await sendTicketNotification(ticketId, 'closed');
       toast.success('Ohutusteade suletud');
       fetchTickets();
     }

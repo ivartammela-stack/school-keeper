@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { sendTicketNotification } from '@/lib/push-notifications';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -106,6 +107,9 @@ export default function Work() {
     if (error) {
       toast.error('Staatuse muutmine ebaõnnestus');
     } else {
+      const notificationType =
+        newStatus === 'resolved' ? 'resolved' : newStatus === 'closed' ? 'closed' : 'updated';
+      await sendTicketNotification(ticketId, notificationType);
       toast.success('Staatus muudetud');
       fetchTickets();
       setSelectedTicket(null);
@@ -121,6 +125,7 @@ export default function Work() {
     if (error) {
       toast.error('Määramine ebaõnnestus');
     } else {
+      await sendTicketNotification(ticketId, 'assigned');
       toast.success('Töö võetud');
       fetchTickets();
       setSelectedTicket(null);

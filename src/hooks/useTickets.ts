@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { DateRange } from 'react-day-picker';
+import { sendTicketNotification, TicketNotificationType } from '@/lib/push-notifications';
 
 export interface TicketFilters {
   statuses?: string[];
@@ -145,6 +146,13 @@ export function useBulkTicketUpdate() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const resolveNotificationType = (status: string): TicketNotificationType => {
+    if (status === 'resolved') return 'resolved';
+    if (status === 'verified') return 'verified';
+    if (status === 'closed') return 'closed';
+    return 'updated';
+  };
+
   const updateStatus = async (ticketIds: string[], newStatus: string) => {
     try {
       setLoading(true);
@@ -152,10 +160,14 @@ export function useBulkTicketUpdate() {
 
       const { error: updateError } = await supabase
         .from('tickets')
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .in('id', ticketIds);
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .in('id', ticketIds);
 
       if (updateError) throw updateError;
+
+      await Promise.all(
+        ticketIds.map((ticketId) => sendTicketNotification(ticketId, resolveNotificationType(newStatus)))
+      );
 
       return { success: true };
     } catch (err) {
@@ -173,10 +185,14 @@ export function useBulkTicketUpdate() {
 
       const { error: updateError } = await supabase
         .from('tickets')
-        .update({ assigned_to: userId, updated_at: new Date().toISOString() })
-        .in('id', ticketIds);
+      .update({ assigned_to: userId, updated_at: new Date().toISOString() })
+      .in('id', ticketIds);
 
       if (updateError) throw updateError;
+
+      if (userId) {
+        await Promise.all(ticketIds.map((ticketId) => sendTicketNotification(ticketId, 'assigned')));
+      }
 
       return { success: true };
     } catch (err) {
