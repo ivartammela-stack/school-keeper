@@ -5,9 +5,10 @@ import { Navigate } from 'react-router-dom';
 
 interface AppLayoutProps {
   children: ReactNode;
+  showBottomNav?: boolean;
 }
 
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({ children, showBottomNav = true }: AppLayoutProps) {
   const { user, loading, roles, isDemo } = useAuth();
 
   if (loading) {
@@ -41,11 +42,11 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className={`min-h-screen bg-background ${showBottomNav ? 'pb-20' : ''}`}>
       <main className="container mx-auto px-4 py-4 max-w-lg">
         {children}
       </main>
-      <BottomNav />
+      {showBottomNav && <BottomNav />}
     </div>
   );
 }

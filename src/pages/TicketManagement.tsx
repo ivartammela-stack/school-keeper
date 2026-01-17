@@ -102,6 +102,11 @@ export default function TicketManagement() {
         ),
       },
       {
+        accessorKey: 'profiles',
+        header: 'Looja',
+        cell: ({ row }) => row.original.profiles?.full_name || '-',
+      },
+      {
         accessorKey: 'categories',
         header: 'Kategooria',
         cell: ({ row }) => row.original.categories?.name || '-',

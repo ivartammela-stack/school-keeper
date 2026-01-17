@@ -38,7 +38,7 @@ const App = () => {
               <Routes>
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/" element={<Navigate to="/submit" replace />} />
-                <Route path="/submit" element={<AppLayout><SubmitTicket /></AppLayout>} />
+                <Route path="/submit" element={<AppLayout showBottomNav={false}><SubmitTicket /></AppLayout>} />
                 <Route path="/my-tickets" element={<AppLayout><MyTickets /></AppLayout>} />
                 <Route path="/work" element={
                   <AppLayout>
