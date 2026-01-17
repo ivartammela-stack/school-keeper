@@ -85,6 +85,42 @@ export type Database = {
         }
         Relationships: []
       }
+      email_templates: {
+        Row: {
+          body: string
+          category: string
+          created_at: string | null
+          enabled: boolean | null
+          id: string
+          name: string
+          subject: string
+          updated_at: string | null
+          variables: string[] | null
+        }
+        Insert: {
+          body: string
+          category?: string
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: string
+          name: string
+          subject: string
+          updated_at?: string | null
+          variables?: string[] | null
+        }
+        Update: {
+          body?: string
+          category?: string
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: string
+          name?: string
+          subject?: string
+          updated_at?: string | null
+          variables?: string[] | null
+        }
+        Relationships: []
+      }
       problem_types: {
         Row: {
           category_id: string
@@ -209,6 +245,36 @@ export type Database = {
         }
         Relationships: []
       }
+      system_settings: {
+        Row: {
+          category: string
+          created_at: string | null
+          description: string | null
+          id: string
+          key: string
+          updated_at: string | null
+          value: Json | null
+        }
+        Insert: {
+          category?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          key: string
+          updated_at?: string | null
+          value?: Json | null
+        }
+        Update: {
+          category?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          key?: string
+          updated_at?: string | null
+          value?: Json | null
+        }
+        Relationships: []
+      }
       ticket_comments: {
         Row: {
           content: string
@@ -249,6 +315,7 @@ export type Database = {
           assigned_to: string | null
           category_id: string
           closed_at: string | null
+          closed_by: string | null
           created_at: string
           created_by: string | null
           description: string | null
@@ -262,6 +329,7 @@ export type Database = {
           priority: number | null
           problem_type_id: string
           resolved_at: string | null
+          resolved_by: string | null
           status: Database["public"]["Enums"]["ticket_status"]
           ticket_number: number
           updated_at: string
@@ -271,6 +339,7 @@ export type Database = {
           assigned_to?: string | null
           category_id: string
           closed_at?: string | null
+          closed_by?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -284,6 +353,7 @@ export type Database = {
           priority?: number | null
           problem_type_id: string
           resolved_at?: string | null
+          resolved_by?: string | null
           status?: Database["public"]["Enums"]["ticket_status"]
           ticket_number?: number
           updated_at?: string
@@ -293,6 +363,7 @@ export type Database = {
           assigned_to?: string | null
           category_id?: string
           closed_at?: string | null
+          closed_by?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -306,6 +377,7 @@ export type Database = {
           priority?: number | null
           problem_type_id?: string
           resolved_at?: string | null
+          resolved_by?: string | null
           status?: Database["public"]["Enums"]["ticket_status"]
           ticket_number?: number
           updated_at?: string
@@ -320,6 +392,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "tickets_closed_by_fkey"
+            columns: ["closed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tickets_duplicate_of_fkey"
             columns: ["duplicate_of"]
             isOneToOne: false
@@ -331,6 +410,13 @@ export type Database = {
             columns: ["problem_type_id"]
             isOneToOne: false
             referencedRelation: "problem_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tickets_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
