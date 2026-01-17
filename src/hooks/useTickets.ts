@@ -63,10 +63,10 @@ export function useTickets(filters: TicketFilters = {}) {
           *,
           categories:category_id(name),
           problem_types:problem_type_id(name),
-          profiles:created_by!tickets_created_by_fkey(full_name),
-          assigned:assigned_to!tickets_assigned_to_fkey(full_name),
-          resolved:resolved_by!tickets_resolved_by_fkey(full_name),
-          closed:closed_by!tickets_closed_by_fkey(full_name)
+          profiles:profiles!tickets_created_by_fkey(full_name),
+          assigned:profiles!tickets_assigned_to_fkey(full_name),
+          resolved:profiles!tickets_resolved_by_fkey(full_name),
+          closed:profiles!tickets_closed_by_fkey(full_name)
         `,
           { count: 'exact' }
         );
