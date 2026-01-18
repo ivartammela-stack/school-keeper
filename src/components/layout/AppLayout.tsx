@@ -42,8 +42,8 @@ export function AppLayout({ children, showBottomNav = true }: AppLayoutProps) {
   }
 
   return (
-    <div className={`min-h-screen bg-background ${showBottomNav ? 'pb-20' : ''}`}>
-      <main className="container mx-auto px-4 py-4 max-w-lg">
+    <div className={`min-h-screen bg-background ${showBottomNav ? 'pb-20 safe-area-bottom' : ''}`}>
+      <main className="container mx-auto px-4 py-4 max-w-lg safe-area-top">
         {children}
       </main>
       {showBottomNav && <BottomNav />}
