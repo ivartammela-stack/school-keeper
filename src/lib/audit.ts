@@ -1,5 +1,7 @@
-import { supabase } from '@/integrations/supabase/client';
+import { addAuditLog } from './firestore';
+import { getCurrentUser } from './firebase-auth';
 import { logEvent } from './analytics';
+import type { TicketStatus } from './firebase-types';
 
 export type AuditAction =
   | 'create'
@@ -16,15 +18,17 @@ export type AuditAction =
 export type EntityType = 'ticket' | 'user' | 'school' | 'setting' | 'email_template';
 
 interface AuditLogParams {
+  schoolId: string;
   action: AuditAction;
   entityType: EntityType;
   entityId: string;
-  details?: Record<string, any>;
-  oldStatus?: string;
-  newStatus?: string;
+  details?: Record<string, unknown>;
+  oldStatus?: TicketStatus;
+  newStatus?: TicketStatus;
 }
 
 export async function logAudit({
+  schoolId,
   action,
   entityType,
   entityId,
@@ -33,41 +37,33 @@ export async function logAudit({
   newStatus,
 }: AuditLogParams): Promise<void> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = getCurrentUser();
 
     if (!user) {
       console.warn('No user found for audit log');
       return;
     }
 
-    // Get user agent and prepare audit data
-    const userAgent = navigator.userAgent;
-
-    // Insert audit log - ticket_id is required, so we use entityId as ticket_id for ticket entities
-    // For non-ticket entities, we still need a valid ticket_id, so skip logging for now
+    // Only log ticket entities to audit log
     if (entityType !== 'ticket') {
       console.warn(`Audit logging skipped for non-ticket entity type: ${entityType}`);
-      return;
-    }
-
-    const { error } = await supabase
-      .from('audit_log')
-      .insert({
-        ticket_id: entityId,
-        user_id: user.id,
+      // Still log to analytics
+      await logEvent('audit_action', {
         action,
-        old_status: oldStatus as any,
-        new_status: newStatus as any,
-        details: details || {},
         entity_type: entityType,
         entity_id: entityId,
-        user_agent: userAgent,
       });
-
-    if (error) {
-      console.error('Failed to log audit:', error);
       return;
     }
+
+    await addAuditLog(schoolId, {
+      ticket_id: entityId,
+      user_id: user.uid,
+      action,
+      old_status: oldStatus,
+      new_status: newStatus,
+      details: details || null,
+    });
 
     // Also log to Firebase Analytics for broader tracking
     await logEvent('audit_action', {
@@ -82,8 +78,13 @@ export async function logAudit({
 
 // Convenience functions for common audit actions
 
-export async function logTicketCreated(ticketId: string, details?: Record<string, any>) {
+export async function logTicketCreated(
+  schoolId: string,
+  ticketId: string,
+  details?: Record<string, unknown>
+) {
   await logAudit({
+    schoolId,
     action: 'create',
     entityType: 'ticket',
     entityId: ticketId,
@@ -92,12 +93,14 @@ export async function logTicketCreated(ticketId: string, details?: Record<string
 }
 
 export async function logTicketUpdated(
+  schoolId: string,
   ticketId: string,
-  oldStatus?: string,
-  newStatus?: string,
-  details?: Record<string, any>
+  oldStatus?: TicketStatus,
+  newStatus?: TicketStatus,
+  details?: Record<string, unknown>
 ) {
   await logAudit({
+    schoolId,
     action: oldStatus && newStatus ? 'status_change' : 'update',
     entityType: 'ticket',
     entityId: ticketId,
@@ -107,8 +110,13 @@ export async function logTicketUpdated(
   });
 }
 
-export async function logTicketDeleted(ticketId: string, details?: Record<string, any>) {
+export async function logTicketDeleted(
+  schoolId: string,
+  ticketId: string,
+  details?: Record<string, unknown>
+) {
   await logAudit({
+    schoolId,
     action: 'delete',
     entityType: 'ticket',
     entityId: ticketId,
@@ -117,11 +125,13 @@ export async function logTicketDeleted(ticketId: string, details?: Record<string
 }
 
 export async function logTicketAssigned(
+  schoolId: string,
   ticketId: string,
   assignedToId: string,
-  details?: Record<string, any>
+  details?: Record<string, unknown>
 ) {
   await logAudit({
+    schoolId,
     action: 'assign',
     entityType: 'ticket',
     entityId: ticketId,
@@ -132,8 +142,13 @@ export async function logTicketAssigned(
   });
 }
 
-export async function logTicketVerified(ticketId: string, details?: Record<string, any>) {
+export async function logTicketVerified(
+  schoolId: string,
+  ticketId: string,
+  details?: Record<string, unknown>
+) {
   await logAudit({
+    schoolId,
     action: 'verify',
     entityType: 'ticket',
     entityId: ticketId,
@@ -142,103 +157,103 @@ export async function logTicketVerified(ticketId: string, details?: Record<strin
 }
 
 export async function logUserLogin(userId: string) {
-  await logAudit({
+  // Just log to analytics, no Firestore audit for non-ticket
+  await logEvent('audit_action', {
     action: 'login',
-    entityType: 'user',
-    entityId: userId,
+    entity_type: 'user',
+    entity_id: userId,
   });
 }
 
 export async function logUserLogout(userId: string) {
-  await logAudit({
+  await logEvent('audit_action', {
     action: 'logout',
-    entityType: 'user',
-    entityId: userId,
+    entity_type: 'user',
+    entity_id: userId,
   });
 }
 
-export async function logUserUpdated(userId: string, details?: Record<string, any>) {
-  await logAudit({
-    action: 'update',
-    entityType: 'user',
-    entityId: userId,
-    details,
-  });
+export async function logBulkUpdate(
+  schoolId: string,
+  entityType: EntityType,
+  entityIds: string[],
+  details?: Record<string, unknown>
+) {
+  if (entityType === 'ticket' && entityIds.length > 0) {
+    await logAudit({
+      schoolId,
+      action: 'bulk_update',
+      entityType,
+      entityId: entityIds[0],
+      details: {
+        ...details,
+        affected_count: entityIds.length,
+        entity_ids: entityIds,
+      },
+    });
+  }
 }
 
-export async function logSchoolCreated(schoolId: string, details?: Record<string, any>) {
-  await logAudit({
-    action: 'create',
-    entityType: 'school',
-    entityId: schoolId,
-    details,
-  });
-}
-
-export async function logSchoolUpdated(schoolId: string, details?: Record<string, any>) {
-  await logAudit({
-    action: 'update',
-    entityType: 'school',
-    entityId: schoolId,
-    details,
-  });
-}
-
-export async function logSchoolDeleted(schoolId: string, details?: Record<string, any>) {
-  await logAudit({
-    action: 'delete',
-    entityType: 'school',
-    entityId: schoolId,
-    details,
+export async function logExport(
+  schoolId: string,
+  dataType: string,
+  format: 'csv' | 'pdf',
+  recordCount: number
+) {
+  await logEvent('audit_action', {
+    action: 'export',
+    data_type: dataType,
+    format,
+    record_count: recordCount,
   });
 }
 
 export async function logSettingChanged(
   settingKey: string,
-  oldValue: any,
-  newValue: any
+  oldValue: unknown,
+  newValue: unknown
 ) {
-  await logAudit({
+  await logEvent('audit_action', {
     action: 'update',
-    entityType: 'setting',
-    entityId: settingKey,
-    details: {
-      old_value: oldValue,
-      new_value: newValue,
-    },
+    entity_type: 'setting',
+    entity_id: settingKey,
+    old_value: JSON.stringify(oldValue),
+    new_value: JSON.stringify(newValue),
   });
 }
 
-export async function logBulkUpdate(
-  entityType: EntityType,
-  entityIds: string[],
-  details?: Record<string, any>
-) {
-  await logAudit({
-    action: 'bulk_update',
-    entityType,
-    entityId: entityIds[0], // Log first entity as primary
-    details: {
-      ...details,
-      affected_count: entityIds.length,
-      entity_ids: entityIds,
-    },
+export async function logUserUpdated(userId: string, details?: Record<string, unknown>) {
+  await logEvent('audit_action', {
+    action: 'update',
+    entity_type: 'user',
+    entity_id: userId,
+    ...details,
   });
 }
 
-export async function logExport(
-  dataType: string,
-  format: 'csv' | 'pdf',
-  recordCount: number
-) {
-  await logAudit({
-    action: 'export',
-    entityType: 'ticket', // or could be generic
-    entityId: `export_${Date.now()}`,
-    details: {
-      data_type: dataType,
-      format,
-      record_count: recordCount,
-    },
+export async function logSchoolCreated(schoolId: string, details?: Record<string, unknown>) {
+  await logEvent('audit_action', {
+    action: 'create',
+    entity_type: 'school',
+    entity_id: schoolId,
+    ...details,
+  });
+}
+
+export async function logSchoolUpdated(schoolId: string, details?: Record<string, unknown>) {
+  await logEvent('audit_action', {
+    action: 'update',
+    entity_type: 'school',
+    entity_id: schoolId,
+    ...details,
+  });
+}
+
+export async function logSchoolDeleted(schoolId: string, details?: Record<string, unknown>) {
+  await logEvent('audit_action', {
+    action: 'delete',
+    entity_type: 'school',
+    entity_id: schoolId,
+    ...details,
   });
 }

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +8,16 @@ import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { ShieldCheck, Trash2 } from 'lucide-react';
+import {
+  getTickets,
+  getCategories,
+  getProblemTypes,
+  getUsersBySchool,
+  updateTicketStatus,
+  deleteTicket as deleteTicketRecord,
+} from '@/lib/firestore';
+import { deleteTicketImages } from '@/lib/firebase-storage';
+import type { Category, ProblemType, User as FirestoreUser } from '@/lib/firebase-types';
 
 type Ticket = {
   id: string;
@@ -47,7 +56,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function Safety() {
-  const { hasRole, user } = useAuth();
+  const { hasRole, user, schoolId } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingTicket, setDeletingTicket] = useState<string | null>(null);
@@ -56,93 +65,96 @@ export default function Safety() {
   const isAdmin = hasRole('admin');
 
   useEffect(() => {
-    fetchTickets();
-  }, []);
+    if (schoolId) {
+      fetchTickets();
+    }
+  }, [schoolId]);
 
   const fetchTickets = async () => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select(`
-        id,
-        ticket_number,
-        location,
-        status,
-        created_at,
-        resolved_at,
-        created_by,
-        assigned_to,
-        resolved_by,
-        closed_by,
-        images,
-        categories (name),
-        problem_types (name),
-        profiles:profiles!tickets_created_by_fkey (full_name),
-        assigned:profiles!tickets_assigned_to_fkey (full_name),
-        resolved:profiles!tickets_resolved_by_fkey (full_name),
-        closed:profiles!tickets_closed_by_fkey (full_name)
-      `)
-      .eq('is_safety_related', true)
-      .order('created_at', { ascending: false });
+    if (!schoolId) return;
 
-    if (!error && data) {
-      setTickets(data as unknown as Ticket[]);
+    try {
+      const [rawTickets, categories, problemTypes, users] = await Promise.all([
+        getTickets(schoolId, { is_safety_related: true }),
+        getCategories(schoolId),
+        getProblemTypes(schoolId),
+        getUsersBySchool(schoolId),
+      ]);
+
+      const categoryMap = new Map<string, Category>();
+      categories.forEach((c) => categoryMap.set(c.id, c));
+
+      const problemTypeMap = new Map<string, ProblemType>();
+      problemTypes.forEach((p) => problemTypeMap.set(p.id, p));
+
+      const userMap = new Map<string, FirestoreUser>();
+      users.forEach((u) => userMap.set(u.id, u));
+
+      const mappedTickets: Ticket[] = rawTickets.map((t) => {
+        const category = categoryMap.get(t.category_id);
+        const problemType = problemTypeMap.get(t.problem_type_id);
+        const creator = t.created_by ? userMap.get(t.created_by) : null;
+        const assignee = t.assigned_to ? userMap.get(t.assigned_to) : null;
+        const resolver = t.resolved_by ? userMap.get(t.resolved_by) : null;
+        const closer = t.closed_by ? userMap.get(t.closed_by) : null;
+
+        return {
+          id: t.id,
+          ticket_number: t.ticket_number,
+          location: t.location,
+          status: t.status,
+          created_at: t.created_at.toISOString(),
+          resolved_at: t.resolved_at?.toISOString() || null,
+          created_by: t.created_by || null,
+          assigned_to: t.assigned_to || null,
+          resolved_by: t.resolved_by || null,
+          closed_by: t.closed_by || null,
+          images: t.images || null,
+          categories: category ? { name: category.name } : null,
+          problem_types: problemType ? { name: problemType.name } : null,
+          profiles: creator ? { full_name: creator.full_name } : null,
+          assigned: assignee ? { full_name: assignee.full_name } : null,
+          resolved: resolver ? { full_name: resolver.full_name } : null,
+          closed: closer ? { full_name: closer.full_name } : null,
+        };
+      });
+
+      setTickets(mappedTickets);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const verifyTicket = async (ticketId: string) => {
-    const { error } = await supabase
-      .from('tickets')
-      .update({ 
-        status: 'verified', 
-        verified_at: new Date().toISOString() 
-      })
-      .eq('id', ticketId);
-
-    if (error) {
-      toast.error('Kinnitamine ebaõnnestus');
-    } else {
+    if (!schoolId) return;
+    try {
+      await updateTicketStatus(schoolId, ticketId, 'verified');
       toast.success('Ohutusteade kinnitatud');
       fetchTickets();
+    } catch (error) {
+      toast.error('Kinnitamine ebaõnnestus');
     }
   };
 
   const closeTicket = async (ticketId: string) => {
-    const { error } = await supabase
-      .from('tickets')
-      .update({ 
-        status: 'closed', 
-        closed_at: new Date().toISOString(),
-        closed_by: user?.id || null
-      })
-      .eq('id', ticketId);
-
-    if (error) {
-      toast.error('Sulgemine ebaõnnestus');
-    } else {
+    if (!schoolId) return;
+    try {
+      await updateTicketStatus(schoolId, ticketId, 'closed', user?.uid || undefined);
       toast.success('Ohutusteade suletud');
       fetchTickets();
+    } catch (error) {
+      toast.error('Sulgemine ebaõnnestus');
     }
   };
 
   const deleteTicket = async (ticket: Ticket) => {
     setDeletingTicket(ticket.id);
     try {
-      if (ticket.images && ticket.images.length > 0) {
-        await supabase.storage.from('ticket-images').remove(ticket.images);
-      }
-
-      const { error } = await supabase
-        .from('tickets')
-        .delete()
-        .eq('id', ticket.id);
-
-      if (error) {
-        toast.error('Teate kustutamine ebaõnnestus');
-      } else {
-        toast.success('Teade kustutatud');
-        fetchTickets();
-      }
+      if (!schoolId) return;
+      await deleteTicketImages(schoolId, ticket.id);
+      await deleteTicketRecord(schoolId, ticket.id);
+      toast.success('Teade kustutatud');
+      fetchTickets();
     } finally {
       setDeletingTicket(null);
     }

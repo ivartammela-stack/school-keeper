@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { DateRange } from 'react-day-picker';
+import { getAuditLogs, getUsersBySchool } from '@/lib/firestore';
+import type { AuditLog, User } from '@/lib/firebase-types';
 
 export interface AuditLogFilters {
+  schoolId: string;
   userId?: string;
   action?: string;
   entityType?: string;
   dateRange?: DateRange;
+  ticketId?: string;
 }
 
 export interface AuditLogEntry {
@@ -28,80 +31,77 @@ export interface AuditLogEntry {
   } | null;
 }
 
-export function useAuditLog(filters: AuditLogFilters = {}) {
+export function useAuditLog(filters: AuditLogFilters) {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchLogs = async () => {
+    if (!filters.schoolId) {
+      setLogs([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      // Build base query - cast to any to avoid deep type instantiation issues
-      const baseQuery = supabase.from('audit_log').select('*', { count: 'exact' }) as any;
+      // Fetch audit logs and users in parallel
+      const [rawLogs, users] = await Promise.all([
+        getAuditLogs(filters.schoolId, filters.ticketId, 100),
+        getUsersBySchool(filters.schoolId),
+      ]);
 
-      // Apply filters
-      let query = baseQuery;
+      // Create user map for quick lookup
+      const userMap = new Map<string, User>();
+      users.forEach((u) => userMap.set(u.id, u));
+
+      // Apply client-side filters
+      let filteredLogs = rawLogs;
+
       if (filters.userId) {
-        query = query.eq('user_id', filters.userId);
+        filteredLogs = filteredLogs.filter((l) => l.user_id === filters.userId);
       }
       if (filters.action) {
-        query = query.eq('action', filters.action);
-      }
-      if (filters.entityType) {
-        query = query.eq('entity_type', filters.entityType);
+        filteredLogs = filteredLogs.filter((l) => l.action === filters.action);
       }
       if (filters.dateRange?.from) {
-        query = query.gte('created_at', filters.dateRange.from.toISOString());
+        filteredLogs = filteredLogs.filter(
+          (l) => l.created_at >= filters.dateRange!.from!
+        );
       }
       if (filters.dateRange?.to) {
-        query = query.lte('created_at', filters.dateRange.to.toISOString());
+        filteredLogs = filteredLogs.filter(
+          (l) => l.created_at <= filters.dateRange!.to!
+        );
       }
 
-      query = query.order('created_at', { ascending: false }).limit(100);
-
-      const { data: auditData, error: fetchError, count } = await query;
-
-      if (fetchError) throw fetchError;
-
-      // Fetch profile info separately
-      const rawData = (auditData || []) as any[];
-      const userIds = [...new Set(rawData.map((a) => a.user_id).filter(Boolean))];
-
-      let profilesMap: Record<string, { full_name: string | null; email: string | null }> = {};
-      if (userIds.length > 0) {
-        const { data: profilesData } = await supabase
-          .from('profiles')
-          .select('id, full_name, email')
-          .in('id', userIds);
-
-        if (profilesData) {
-          profilesMap = Object.fromEntries(
-            profilesData.map((p) => [p.id, { full_name: p.full_name, email: p.email }])
-          );
-        }
-      }
-
-      const entries: AuditLogEntry[] = rawData.map((row) => ({
-        id: row.id,
-        ticket_id: row.ticket_id,
-        user_id: row.user_id,
-        action: row.action,
-        old_status: row.old_status,
-        new_status: row.new_status,
-        details: row.details,
-        created_at: row.created_at,
-        entity_type: row.entity_type ?? null,
-        entity_id: row.entity_id ?? null,
-        ip_address: row.ip_address ?? null,
-        user_agent: row.user_agent ?? null,
-        profiles: row.user_id ? profilesMap[row.user_id] || null : null,
-      }));
+      // Map to entry format with user info
+      const entries: AuditLogEntry[] = filteredLogs.map((log) => {
+        const user = log.user_id ? userMap.get(log.user_id) : null;
+        return {
+          id: log.id,
+          ticket_id: log.ticket_id,
+          user_id: log.user_id || null,
+          action: log.action,
+          old_status: log.old_status || null,
+          new_status: log.new_status || null,
+          details: log.details || null,
+          created_at: log.created_at.toISOString(),
+          entity_type: null,
+          entity_id: null,
+          ip_address: null,
+          user_agent: null,
+          profiles: user
+            ? { full_name: user.full_name, email: user.email }
+            : null,
+        };
+      });
 
       setLogs(entries);
-      setTotalCount(count || 0);
+      setTotalCount(entries.length);
     } catch (err) {
       setError(err as Error);
       console.error('Error fetching audit logs:', err);
@@ -112,12 +112,14 @@ export function useAuditLog(filters: AuditLogFilters = {}) {
 
   useEffect(() => {
     fetchLogs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    filters.schoolId,
     filters.userId,
     filters.action,
     filters.entityType,
-    filters.dateRange,
+    filters.dateRange?.from?.toISOString(),
+    filters.dateRange?.to?.toISOString(),
+    filters.ticketId,
   ]);
 
   return {

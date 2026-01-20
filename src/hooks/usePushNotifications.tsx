@@ -1,28 +1,27 @@
 import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { PushNotifications, Token, PushNotificationSchema, ActionPerformed } from '@capacitor/push-notifications';
+import {
+  PushNotifications,
+  Token,
+  PushNotificationSchema,
+  ActionPerformed,
+} from '@capacitor/push-notifications';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { savePushToken } from '@/lib/firestore';
+import { onAuthChange } from '@/lib/firebase-auth';
 
-const registerTokenWithBackend = async (token: string, platform: 'android' | 'ios' | 'web') => {
+const registerTokenWithBackend = async (
+  token: string,
+  platform: 'android' | 'ios' | 'web',
+  userId: string
+) => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      console.log('No session, skipping token registration');
-      return;
-    }
-
-    const { data, error } = await supabase.functions.invoke('register-push-token', {
-      body: { token, platform },
+    await savePushToken({
+      user_id: userId,
+      token,
+      platform,
     });
-
-    if (error) {
-      console.error('Error registering push token with backend:', error);
-      return;
-    }
-
-    console.log('Push token registered with backend:', data);
+    console.log('Push token registered with backend');
   } catch (error) {
     console.error('Failed to register push token:', error);
   }
@@ -38,29 +37,22 @@ const getPlatform = (): 'android' | 'ios' | 'web' => {
 export const usePushNotifications = () => {
   const [token, setToken] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
+  // Listen to auth state changes
   useEffect(() => {
-    if (!token) return;
-
-    const tryRegister = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        await registerTokenWithBackend(token, getPlatform());
-      }
-    };
-
-    tryRegister();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        registerTokenWithBackend(token, getPlatform());
-      }
+    const unsubscribe = onAuthChange((user) => {
+      setUserId(user?.uid || null);
     });
+    return () => unsubscribe();
+  }, []);
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [token]);
+  // Register token when we have both token and userId
+  useEffect(() => {
+    if (!token || !userId) return;
+
+    registerTokenWithBackend(token, getPlatform(), userId);
+  }, [token, userId]);
 
   useEffect(() => {
     const isPushSupported = Capacitor.isNativePlatform();
@@ -75,7 +67,7 @@ export const usePushNotifications = () => {
       try {
         // Request permission
         const permStatus = await PushNotifications.checkPermissions();
-        
+
         if (permStatus.receive === 'prompt') {
           const result = await PushNotifications.requestPermissions();
           if (result.receive !== 'granted') {
@@ -97,14 +89,19 @@ export const usePushNotifications = () => {
     // Add listeners
     const setupListeners = async () => {
       // On registration success
-      await PushNotifications.addListener('registration', async (tokenData: Token) => {
-        console.log('Push registration success');
-        setToken(tokenData.value);
-        
-        // Register token with backend
-        const platform = getPlatform();
-        await registerTokenWithBackend(tokenData.value, platform);
-      });
+      await PushNotifications.addListener(
+        'registration',
+        async (tokenData: Token) => {
+          console.log('Push registration success');
+          setToken(tokenData.value);
+
+          // Register token with backend if we have userId
+          if (userId) {
+            const platform = getPlatform();
+            await registerTokenWithBackend(tokenData.value, platform, userId);
+          }
+        }
+      );
 
       // On registration error
       await PushNotifications.addListener('registrationError', (error) => {
@@ -112,23 +109,29 @@ export const usePushNotifications = () => {
       });
 
       // On push notification received (foreground)
-      await PushNotifications.addListener('pushNotificationReceived', (notification: PushNotificationSchema) => {
-        console.log('Push notification received:', notification);
-        toast(notification.title || 'Teavitus', {
-          description: notification.body,
-        });
-      });
+      await PushNotifications.addListener(
+        'pushNotificationReceived',
+        (notification: PushNotificationSchema) => {
+          console.log('Push notification received:', notification);
+          toast(notification.title || 'Teavitus', {
+            description: notification.body,
+          });
+        }
+      );
 
       // On push notification action performed (user tapped notification)
-      await PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
-        console.log('Push notification action performed:', action);
-        // Handle navigation based on action.notification.data
-        const data = action.notification.data;
-        if (data?.ticketId) {
-          // Navigate to ticket - this will depend on your routing setup
-          window.location.href = `/my-tickets`;
+      await PushNotifications.addListener(
+        'pushNotificationActionPerformed',
+        (action: ActionPerformed) => {
+          console.log('Push notification action performed:', action);
+          // Handle navigation based on action.notification.data
+          const data = action.notification.data;
+          if (data?.ticketId) {
+            // Navigate to ticket
+            window.location.href = `/my-tickets`;
+          }
         }
-      });
+      );
     };
 
     setupListeners();
@@ -138,7 +141,7 @@ export const usePushNotifications = () => {
     return () => {
       PushNotifications.removeAllListeners();
     };
-  }, []);
+  }, [userId]);
 
   const requestPermission = async () => {
     if (!isSupported) {

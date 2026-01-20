@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  signInWithEmail,
+  signUpWithEmail,
+  resetPassword,
+  onAuthChange,
+} from '@/lib/firebase-auth';
+import { updatePassword } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,48 +33,46 @@ export default function Auth() {
     }
   }, [user, loading, navigate, mode]);
 
-  // Check for password recovery event
+  // Check for password recovery via URL params
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setMode('reset-password');
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    const urlParams = new URLSearchParams(window.location.search);
+    const oobCode = urlParams.get('oobCode');
+    const resetMode = urlParams.get('mode');
+    if (oobCode && resetMode === 'resetPassword') {
+      setMode('reset-password');
+    }
   }, []);
 
   const handleSignUp = async () => {
-    const redirectUrl = `${window.location.origin}/`;
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: { full_name: fullName }
-      }
-    });
-
-    if (error) {
-      if (error.message.includes('already registered')) {
+    try {
+      await signUpWithEmail(email, password, fullName);
+      toast.success('Konto loodud! Oota administraatori kinnitust.');
+    } catch (error: unknown) {
+      const err = error as { message?: string; code?: string };
+      if (err.code === 'auth/email-already-in-use') {
         toast.error('See email on juba registreeritud. Proovi sisse logida.');
       } else {
-        toast.error(error.message);
+        toast.error(err.message || 'Registreerimine ebaõnnestus');
       }
-    } else {
-      toast.success('Konto loodud! Oota administraatori kinnitust.');
+      throw error;
     }
   };
 
   const handleSignIn = async () => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      if (error.message.includes('Invalid login credentials')) {
+    try {
+      await signInWithEmail(email, password);
+    } catch (error: unknown) {
+      const err = error as { message?: string; code?: string };
+      if (
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/user-not-found' ||
+        err.code === 'auth/invalid-credential'
+      ) {
         toast.error('Vale email või parool');
       } else {
-        toast.error(error.message);
+        toast.error(err.message || 'Sisselogimine ebaõnnestus');
       }
+      throw error;
     }
   };
 
@@ -77,16 +82,14 @@ export default function Auth() {
       return;
     }
 
-    const redirectUrl = `${window.location.origin}/auth`;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl,
-    });
-
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await resetPassword(email);
       toast.success('Parooli lähtestamise link saadeti emailile!');
       setMode('signin');
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      toast.error(err.message || 'Parooli lähtestamine ebaõnnestus');
+      throw error;
     }
   };
 
@@ -96,14 +99,20 @@ export default function Auth() {
       return;
     }
 
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Parool on edukalt muudetud!');
-      setMode('signin');
-      navigate('/');
+    try {
+      const currentUser = auth?.currentUser;
+      if (currentUser) {
+        await updatePassword(currentUser, newPassword);
+        toast.success('Parool on edukalt muudetud!');
+        setMode('signin');
+        navigate('/');
+      } else {
+        toast.error('Kasutaja pole sisse logitud');
+      }
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      toast.error(err.message || 'Parooli muutmine ebaõnnestus');
+      throw error;
     }
   };
 
@@ -126,8 +135,8 @@ export default function Auth() {
           await handleResetPassword();
           break;
       }
-    } catch (error: any) {
-      toast.error(error.message || 'Midagi läks valesti');
+    } catch {
+      // Error already handled in individual handlers
     } finally {
       setIsSubmitting(false);
     }
@@ -143,19 +152,27 @@ export default function Auth() {
 
   const getTitle = () => {
     switch (mode) {
-      case 'signup': return 'Loo uus konto';
-      case 'signin': return 'Logi oma kontole sisse';
-      case 'forgot-password': return 'Lähtesta parool';
-      case 'reset-password': return 'Sisesta uus parool';
+      case 'signup':
+        return 'Loo uus konto';
+      case 'signin':
+        return 'Logi oma kontole sisse';
+      case 'forgot-password':
+        return 'Lähtesta parool';
+      case 'reset-password':
+        return 'Sisesta uus parool';
     }
   };
 
   const getButtonText = () => {
     switch (mode) {
-      case 'signup': return 'Registreeru';
-      case 'signin': return 'Logi sisse';
-      case 'forgot-password': return 'Saada lähtestamise link';
-      case 'reset-password': return 'Salvesta uus parool';
+      case 'signup':
+        return 'Registreeru';
+      case 'signin':
+        return 'Logi sisse';
+      case 'forgot-password':
+        return 'Saada lähtestamise link';
+      case 'reset-password':
+        return 'Salvesta uus parool';
     }
   };
 
@@ -171,9 +188,7 @@ export default function Auth() {
             <h1 className="text-2xl font-bold tracking-tight text-foreground">
               Kooli Hooldus
             </h1>
-            <p className="text-muted-foreground">
-              {getTitle()}
-            </p>
+            <p className="text-muted-foreground">{getTitle()}</p>
           </div>
 
           {/* Back button for forgot password and reset password */}
@@ -300,9 +315,15 @@ export default function Auth() {
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 {mode === 'signin' ? (
-                  <>Pole veel kontot? <span className="text-orange-500 font-medium">Registreeru</span></>
+                  <>
+                    Pole veel kontot?{' '}
+                    <span className="text-orange-500 font-medium">Registreeru</span>
+                  </>
                 ) : (
-                  <>Sul on juba konto? <span className="text-orange-500 font-medium">Logi sisse</span></>
+                  <>
+                    Sul on juba konto?{' '}
+                    <span className="text-orange-500 font-medium">Logi sisse</span>
+                  </>
                 )}
               </button>
             </div>

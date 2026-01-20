@@ -1,51 +1,15 @@
-import { supabase } from '@/integrations/supabase/client';
 import { logger } from './logger';
 
+// Firebase Storage doesn't require bucket setup like Supabase
+// Storage rules are configured in firebase.storage.rules
 export async function setupStorage() {
   try {
-    // Check if bucket exists
-    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-    
-    if (listError) {
-      logger.error('Failed to list buckets', listError);
-      return false;
-    }
-
-    const bucketExists = buckets?.some(b => b.id === 'ticket-images');
-    
-    if (!bucketExists) {
-      // Create bucket as private
-      const { error: createError } = await supabase.storage.createBucket('ticket-images', {
-        public: false,
-        fileSizeLimit: 5242880, // 5MB
-        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
-      });
-      
-      if (createError) {
-        logger.error('Failed to create bucket', createError);
-        return false;
-      }
-      
-      logger.info('Storage bucket created successfully');
-    } else {
-      // Update existing bucket to be private
-      const { error: updateError } = await supabase.storage.updateBucket('ticket-images', {
-        public: false,
-        fileSizeLimit: 5242880,
-        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
-      });
-      
-      if (updateError) {
-        logger.error('Failed to update bucket', updateError);
-        // Continue anyway, might not have permissions
-      } else {
-        logger.info('Storage bucket updated to private');
-      }
-    }
-    
+    // Firebase Storage is automatically available once initialized
+    // No bucket creation needed - storage is ready to use
+    logger.info('Firebase Storage ready');
     return true;
   } catch (error) {
-    logger.error('Storage setup failed', error);
+    logger.error('Storage setup check failed', error);
     return false;
   }
 }

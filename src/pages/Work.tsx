@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +9,17 @@ import { format } from 'date-fns';
 import { et } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { Image as ImageIcon, X, Trash2 } from 'lucide-react';
+import {
+  getTickets,
+  getCategories,
+  getProblemTypes,
+  getUsersBySchool,
+  updateTicket,
+  updateTicketStatus,
+  deleteTicket as deleteTicketRecord,
+} from '@/lib/firestore';
+import { deleteTicketImages } from '@/lib/firebase-storage';
+import type { Category, ProblemType, User as FirestoreUser } from '@/lib/firebase-types';
 
 type Ticket = {
   id: string;
@@ -46,13 +56,12 @@ const statusColors: Record<string, string> = {
 };
 
 export default function Work() {
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, schoolId } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [deletingTicket, setDeletingTicket] = useState(false);
 
   const isAdmin = hasRole('admin');
@@ -61,111 +70,108 @@ export default function Work() {
   const canManageWork = isAdmin || isWorker || isFacilityManager;
 
   useEffect(() => {
-    fetchTickets();
-  }, [filter]);
-
-  useEffect(() => {
-    const loadImageUrls = async () => {
-      const allImages: string[] = [];
-      tickets.forEach(ticket => {
-        if (ticket.images) {
-          allImages.push(...ticket.images);
-        }
-      });
-
-      const urls: Record<string, string> = {};
-      for (const imagePath of allImages) {
-        if (!imageUrls[imagePath]) {
-          const { data, error } = await supabase.storage
-            .from('ticket-images')
-            .createSignedUrl(imagePath, 60 * 60);
-
-          if (!error && data?.signedUrl) {
-            urls[imagePath] = data.signedUrl;
-          }
-        }
-      }
-
-      if (Object.keys(urls).length > 0) {
-        setImageUrls(prev => ({ ...prev, ...urls }));
-      }
-    };
-
-    if (tickets.length > 0) {
-      loadImageUrls();
+    if (schoolId) {
+      fetchTickets();
     }
-  }, [tickets, imageUrls]);
+  }, [filter, schoolId]);
 
-  const getImageUrl = (path: string) => imageUrls[path] || '';
+  const getImageUrl = (url: string) => url;
 
   const fetchTickets = async () => {
-    let query = supabase
-      .from('tickets')
-      .select(`
-        id,
-        ticket_number,
-        location,
-        status,
-        created_at,
-        is_safety_related,
-        assigned_to,
-        description,
-        images,
-        categories (name),
-        problem_types (name),
-        profiles:profiles!tickets_created_by_fkey (full_name),
-        assigned:profiles!tickets_assigned_to_fkey (full_name),
-        resolved:profiles!tickets_resolved_by_fkey (full_name),
-        closed:profiles!tickets_closed_by_fkey (full_name)
-      `)
-      .in('status', ['submitted', 'in_progress', 'resolved'])
-      .order('created_at', { ascending: false });
+    if (!schoolId) return;
+    try {
+      const [rawTickets, categories, problemTypes, users] = await Promise.all([
+        getTickets(schoolId),
+        getCategories(schoolId),
+        getProblemTypes(schoolId),
+        getUsersBySchool(schoolId),
+      ]);
 
-    if (filter === 'mine' && (isWorker || isFacilityManager)) {
-      query = query.eq('assigned_to', user!.id);
+      const categoryMap = new Map<string, Category>();
+      categories.forEach((c) => categoryMap.set(c.id, c));
+
+      const problemTypeMap = new Map<string, ProblemType>();
+      problemTypes.forEach((p) => problemTypeMap.set(p.id, p));
+
+      const userMap = new Map<string, FirestoreUser>();
+      users.forEach((u) => userMap.set(u.id, u));
+
+      let filteredTickets = rawTickets.filter((t) =>
+        ['submitted', 'in_progress', 'resolved'].includes(t.status)
+      );
+
+      if (filter === 'mine' && (isWorker || isFacilityManager) && user) {
+        filteredTickets = filteredTickets.filter((t) => t.assigned_to === user.uid);
+      }
+
+      const mappedTickets: Ticket[] = filteredTickets.map((t) => {
+        const category = categoryMap.get(t.category_id);
+        const problemType = problemTypeMap.get(t.problem_type_id);
+        const creator = t.created_by ? userMap.get(t.created_by) : null;
+        const assignee = t.assigned_to ? userMap.get(t.assigned_to) : null;
+        const resolver = t.resolved_by ? userMap.get(t.resolved_by) : null;
+        const closer = t.closed_by ? userMap.get(t.closed_by) : null;
+
+        return {
+          id: t.id,
+          ticket_number: t.ticket_number,
+          location: t.location,
+          status: t.status,
+          created_at: t.created_at.toISOString(),
+          is_safety_related: t.is_safety_related || false,
+          assigned_to: t.assigned_to || null,
+          description: t.description || null,
+          images: t.images || null,
+          categories: category ? { name: category.name } : null,
+          problem_types: problemType ? { name: problemType.name } : null,
+          profiles: creator ? { full_name: creator.full_name } : null,
+          assigned: assignee ? { full_name: assignee.full_name } : null,
+          resolved: resolver ? { full_name: resolver.full_name } : null,
+          closed: closer ? { full_name: closer.full_name } : null,
+        };
+      });
+
+      setTickets(mappedTickets);
+    } finally {
+      setLoading(false);
     }
-
-    const { data, error } = await query;
-
-    if (!error && data) {
-      setTickets(data as unknown as Ticket[]);
-    }
-    setLoading(false);
   };
 
   const updateStatus = async (ticketId: string, newStatus: string) => {
-    const updates: any = { status: newStatus };
-    if (newStatus === 'resolved') updates.resolved_at = new Date().toISOString();
-    if (newStatus === 'closed') updates.closed_at = new Date().toISOString();
-    if (newStatus === 'resolved') updates.resolved_by = user?.id || null;
-    if (newStatus === 'closed') updates.closed_by = user?.id || null;
-    if (newStatus === 'submitted') {
-      updates.assigned_to = null;
-      updates.resolved_by = null;
-      updates.closed_by = null;
-      updates.resolved_at = null;
-      updates.closed_at = null;
-    }
+    if (!schoolId) return;
 
     if (newStatus === 'resolved' && !isAdmin) {
       const ticket = tickets.find((t) => t.id === ticketId);
-      if (ticket?.assigned_to !== user?.id) {
+      if (ticket?.assigned_to !== user?.uid) {
         toast.error('Ainult töö võtnud kasutaja saab lahendatuks märkida');
         return;
       }
     }
 
-    const { error } = await supabase
-      .from('tickets')
-      .update(updates)
-      .eq('id', ticketId);
+    try {
+      if (newStatus === 'submitted') {
+        await updateTicket(schoolId, ticketId, {
+          status: 'submitted',
+          assigned_to: null,
+          resolved_by: null,
+          closed_by: null,
+          resolved_at: null,
+          verified_at: null,
+          closed_at: null,
+        });
+      } else if (newStatus === 'in_progress') {
+        await updateTicket(schoolId, ticketId, { status: 'in_progress' });
+      } else if (newStatus === 'resolved') {
+        await updateTicketStatus(schoolId, ticketId, 'resolved', user?.uid || undefined);
+      } else if (newStatus === 'closed') {
+        await updateTicketStatus(schoolId, ticketId, 'closed', user?.uid || undefined);
+      }
 
-    if (error) {
-      toast.error('Staatuse muutmine ebaõnnestus');
-    } else {
       toast.success('Staatus muudetud');
       fetchTickets();
       setSelectedTicket(null);
+    } catch (error) {
+      toast.error('Staatuse muutmine ebaõnnestus');
     }
   };
 
@@ -176,48 +182,30 @@ export default function Work() {
       return;
     }
 
-    const { error } = await supabase
-      .from('tickets')
-      .update({ assigned_to: user!.id, status: 'in_progress' })
-      .eq('id', ticketId);
+    if (!schoolId || !user) return;
 
-    if (error) {
-      toast.error('Määramine ebaõnnestus');
-    } else {
+    try {
+      await updateTicket(schoolId, ticketId, {
+        assigned_to: user.uid,
+        status: 'in_progress',
+      });
       toast.success('Töö võetud');
       fetchTickets();
       setSelectedTicket(null);
+    } catch (error) {
+      toast.error('Määramine ebaõnnestus');
     }
   };
 
   const deleteTicket = async (ticket: Ticket) => {
     setDeletingTicket(true);
     try {
-      // Delete images from storage first
-      if (ticket.images && ticket.images.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from('ticket-images')
-          .remove(ticket.images);
-        
-        if (storageError) {
-          console.error('Error deleting images:', storageError);
-        }
-      }
-
-      // Delete the ticket (cascade will handle audit_log and comments)
-      const { error } = await supabase
-        .from('tickets')
-        .delete()
-        .eq('id', ticket.id);
-
-      if (error) {
-        toast.error('Teate kustutamine ebaõnnestus');
-        console.error(error);
-      } else {
-        toast.success('Teade kustutatud');
-        fetchTickets();
-        setSelectedTicket(null);
-      }
+      if (!schoolId) return;
+      await deleteTicketImages(schoolId, ticket.id);
+      await deleteTicketRecord(schoolId, ticket.id);
+      toast.success('Teade kustutatud');
+      fetchTickets();
+      setSelectedTicket(null);
     } finally {
       setDeletingTicket(false);
     }
@@ -407,7 +395,7 @@ export default function Work() {
                     </Button>
                   )}
                   
-                  {selectedTicket.status === 'in_progress' && (isAdmin || selectedTicket.assigned_to === user?.id) && (
+                  {selectedTicket.status === 'in_progress' && (isAdmin || selectedTicket.assigned_to === user?.uid) && (
                     <Button size="sm" onClick={() => updateStatus(selectedTicket.id, 'resolved')}>
                       Märgi lahendatuks
                     </Button>

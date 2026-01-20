@@ -1,13 +1,15 @@
+# AGENTS.md
+
 ## Eesmargid
 - Ole lakooniline; vastused 3-8 punkti max.
 - Kysi lisakysimusi ainult siis, kui on vajalik.
 - Kui saad, tee muudatused otse koodis.
 
 ## Projekti ulevaade
-- Stack: Vite + React + TypeScript + Tailwind + shadcn-ui.
+- Stack: Vite + React + TypeScript + Tailwind + shadcn-ui + Capacitor.
 - Auth ja DB: Firebase (Firestore, Auth).
-- Storage: Firebase Storage.
-- Route'id ja rollikontroll: `src/App.tsx`, `src/components/ProtectedRoute`.
+- Storage: Firebase Storage (ticketi pildid on download URL-id).
+- Funktsioonid: Firebase Cloud Functions (setUserRole, deleteUser).
 
 ## Kiired kasud
 - Failid: lehed `src/pages`, hookid `src/hooks`, UI `src/components`.
@@ -18,15 +20,10 @@
 - Dev: `npm run dev`
 - Build: `npm run build`
 - Lint: `npm run lint`
-- Test: `npm run test`
+- Deploy: `firebase deploy --only hosting,functions`
 
 ## Kodeerimise juhised
-- Kasuta olemasolevaid komponente ja hooke; ara loo duble.
-- Hoia UI keeles (EST) koik tekstid uhtlased.
-- Vali vaiksed, otsekohesed muudatused; ara tee refaktorit ilma vajaduseta.
 - Hoia muudatused Firebase-pohised; ara too tagasi Supabase.
-
-## Tokenite kokkuhoid
-- Ara korda koodi, viita failitee ja relevantsetele ridadele.
-- Kuva diff/katkend ainult siis, kui kasutaja palub.
-- Anneta valmis muutus ja luhike pohjendus.
+- Kasuta olemasolevaid komponente ja hooke; ara loo duble.
+- Hoia UI tekstid eesti keeles uhtlased.
+- Kui puudutad rollilogikat, uuenda `users.role` ja vajadusel custom claims.

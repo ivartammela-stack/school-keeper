@@ -1,6 +1,6 @@
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
-import { supabase } from '@/integrations/supabase/client';
+import { savePushToken, deletePushToken } from './firestore';
 import { logger } from './logger';
 
 export async function initializePushNotifications(userId: string) {
@@ -12,11 +12,11 @@ export async function initializePushNotifications(userId: string) {
   try {
     // Request permission
     const permResult = await PushNotifications.requestPermissions();
-    
+
     if (permResult.receive === 'granted') {
       // Register with FCM/APNs
       await PushNotifications.register();
-      
+
       logger.info('Push notifications registered');
     } else {
       logger.warn('Push notification permission denied');
@@ -31,21 +31,17 @@ export async function initializePushNotifications(userId: string) {
         return;
       }
 
-      // Save token to push_tokens table
+      // Save token to Firestore
       const platform = Capacitor.getPlatform() as 'android' | 'ios' | 'web';
-      const { error } = await supabase
-        .from('push_tokens')
-        .upsert({
+      try {
+        await savePushToken({
           user_id: userId,
           token: token.value,
-          platform: platform,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id,token' });
-
-      if (error) {
-        logger.error(`Failed to save push token: ${error.message} (${error.code})`);
-      } else {
+          platform,
+        });
         logger.info('Push token saved successfully');
+      } catch (error) {
+        logger.error('Failed to save push token', error);
       }
     });
 
@@ -70,26 +66,25 @@ export async function initializePushNotifications(userId: string) {
         window.location.href = `/my-tickets?ticket=${data.ticket_id}`;
       }
     });
-
-  } catch (error: any) {
-    console.error('Push init error:', error?.message || error?.code || JSON.stringify(error));
+  } catch (error: unknown) {
+    const err = error as { message?: string; code?: string };
+    console.error('Push init error:', err?.message || err?.code || JSON.stringify(error));
     logger.error('Failed to initialize push notifications', error);
   }
 }
 
-export async function unregisterPushNotifications(userId: string) {
+export async function unregisterPushNotifications(userId: string, token?: string) {
   if (!Capacitor.isNativePlatform()) return;
 
   try {
-    // Clear tokens from database
-    await supabase
-      .from('push_tokens')
-      .delete()
-      .eq('user_id', userId);
+    // Clear token from Firestore
+    if (token) {
+      await deletePushToken(token);
+    }
 
     // Unregister from FCM/APNs
     await PushNotifications.removeAllListeners();
-    
+
     logger.info('Push notifications unregistered');
   } catch (error) {
     logger.error('Failed to unregister push notifications', error);

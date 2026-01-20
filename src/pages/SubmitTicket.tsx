@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +11,15 @@ import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
 import { Capacitor } from '@capacitor/core';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import {
+  createTicket,
+  getCategories,
+  getDuplicateTickets,
+  getProblemTypes,
+  updateTicket,
+} from '@/lib/firestore';
+import { uploadTicketImage } from '@/lib/firebase-storage';
+import type { Category, ProblemType } from '@/lib/firebase-types';
 
 // Helper to convert base64 to blob URL (more memory efficient for mobile)
 const base64ToBlobUrl = (base64String: string, mimeType: string = 'image/jpeg'): { blobUrl: string; file: File } => {
@@ -26,20 +34,6 @@ const base64ToBlobUrl = (base64String: string, mimeType: string = 'image/jpeg'):
   return { blobUrl, file };
 };
 
-type Category = {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-};
-
-type ProblemType = {
-  id: string;
-  code: string;
-  name: string;
-  category_id: string;
-};
-
 type DuplicateTicket = {
   id: string;
   ticket_number: number;
@@ -52,7 +46,7 @@ const STEPS = ['Valdkond', 'Probleem', 'Asukoht', 'Esita'];
 
 export default function SubmitTicket() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [step, setStep] = useState(0);
   const [categories, setCategories] = useState<Category[]>([]);
   const [problemTypes, setProblemTypes] = useState<ProblemType[]>([]);
@@ -79,34 +73,31 @@ export default function SubmitTicket() {
   }, []);
 
   useEffect(() => {
-    fetchCategories();
-  }, []);
+    if (schoolId) {
+      fetchCategories();
+    }
+  }, [schoolId]);
 
   useEffect(() => {
-    if (selectedCategory) {
+    if (selectedCategory && schoolId) {
       fetchProblemTypes(selectedCategory.id);
     }
-  }, [selectedCategory]);
+  }, [selectedCategory, schoolId]);
 
   const fetchCategories = async () => {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('*')
-      .order('sort_order');
-    if (!error && data) setCategories(data);
+    if (!schoolId) return;
+    const data = await getCategories(schoolId);
+    setCategories(data);
   };
 
   const fetchProblemTypes = async (categoryId: string) => {
-    const { data, error } = await supabase
-      .from('problem_types')
-      .select('*')
-      .eq('category_id', categoryId)
-      .order('sort_order');
-    if (!error && data) setProblemTypes(data);
+    if (!schoolId) return;
+    const data = await getProblemTypes(schoolId);
+    setProblemTypes(data.filter((p) => p.category_id === categoryId));
   };
 
   const checkDuplicates = async () => {
-    if (!selectedProblem || !location.trim()) return;
+    if (!selectedProblem || !location.trim() || !schoolId) return;
 
     const cleanLocation = location.trim();
     if (cleanLocation.length < 2 || cleanLocation.length > 200) {
@@ -116,16 +107,22 @@ export default function SubmitTicket() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('id, ticket_number, location, status, created_at')
-      .eq('problem_type_id', selectedProblem.id)
-      .eq('location_key', cleanLocation.toLowerCase())
-      .in('status', ['submitted', 'in_progress'])
-      .gte('created_at', sevenDaysAgo.toISOString());
+    const data = await getDuplicateTickets(
+      schoolId,
+      selectedProblem.id,
+      cleanLocation.toLowerCase(),
+      sevenDaysAgo
+    );
 
-    if (!error && data && data.length > 0) {
-      setDuplicates(data);
+    if (data.length > 0) {
+      const mappedDuplicates = data.map((ticket) => ({
+        id: ticket.id,
+        ticket_number: ticket.ticket_number,
+        location: ticket.location,
+        status: ticket.status,
+        created_at: ticket.created_at.toISOString(),
+      }));
+      setDuplicates(mappedDuplicates);
       setShowDuplicateWarning(true);
     } else {
       setDuplicates([]);
@@ -214,64 +211,48 @@ export default function SubmitTicket() {
   }, [imagePreviewUrls]);
 
   const handleSubmit = async (addToDuplicate?: string) => {
-    if (!user || !selectedCategory || !selectedProblem || !location.trim()) return;
+    if (!user || !schoolId || !selectedCategory || !selectedProblem || !location.trim()) return;
 
     setSubmitting(true);
     try {
       const isSafetyRelated = selectedCategory.name === 'Ohutus ja töökeskkond';
 
-      const { data, error } = await supabase
-        .from('tickets')
-        .insert({
-          category_id: selectedCategory.id,
-          problem_type_id: selectedProblem.id,
-          location: location.trim(),
-          description: description.trim() || null,
-          created_by: user.id,
-          is_safety_related: isSafetyRelated,
-          duplicate_of: addToDuplicate || null,
-          duplicate_reason: addToDuplicate ? null : (duplicateReason || null),
-        })
-        .select()
-        .single();
+      const ticketId = await createTicket(schoolId, {
+        category_id: selectedCategory.id,
+        problem_type_id: selectedProblem.id,
+        location: location.trim(),
+        location_key: location.trim().toLowerCase(),
+        description: description.trim() || null,
+        created_by: user.uid,
+        is_safety_related: isSafetyRelated,
+        status: 'submitted',
+        assigned_to: null,
+        resolved_by: null,
+        closed_by: null,
+        resolved_at: null,
+        verified_at: null,
+        closed_at: null,
+        images: [],
+        duplicate_of: addToDuplicate || null,
+        duplicate_reason: addToDuplicate ? null : (duplicateReason || null),
+      });
 
-      if (error) throw error;
+      if (selectedImages.length > 0) {
+        const uploadedImageUrls: string[] = [];
+        console.log('Uploading', selectedImages.length, 'images for ticket', ticketId);
 
-      if (selectedImages.length > 0 && data) {
-        const uploadedImagePaths: string[] = [];
-        console.log('Uploading', selectedImages.length, 'images for ticket', data.id);
-        
         for (const file of selectedImages) {
-          const fileExt = file.name.split('.').pop();
-          const fileName = `${data.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-          console.log('Uploading file:', fileName, 'size:', file.size);
-          
-          const { error: uploadError } = await supabase.storage
-            .from('ticket-images')
-            .upload(fileName, file);
-          
-          if (!uploadError) {
-            uploadedImagePaths.push(fileName);
-            console.log('Upload success:', fileName);
-          } else {
+          try {
+            const url = await uploadTicketImage(schoolId, ticketId, file);
+            uploadedImageUrls.push(url);
+          } catch (uploadError) {
             console.error('Upload error:', uploadError);
             logger.error('Failed to upload image', uploadError);
           }
         }
-        
-        console.log('Uploaded paths:', uploadedImagePaths);
-        
-        if (uploadedImagePaths.length > 0) {
-          const { error: updateError } = await supabase
-            .from('tickets')
-            .update({ images: uploadedImagePaths })
-            .eq('id', data.id);
-          
-          if (updateError) {
-            console.error('Failed to update ticket with images:', updateError);
-          } else {
-            console.log('Ticket updated with images');
-          }
+
+        if (uploadedImageUrls.length > 0) {
+          await updateTicket(schoolId, ticketId, { images: uploadedImageUrls });
         }
       }
 

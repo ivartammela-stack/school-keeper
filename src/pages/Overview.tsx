@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
+import { getTickets } from '@/lib/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart3, AlertTriangle, CheckCircle, Clock, Users } from 'lucide-react';
 
@@ -13,6 +14,7 @@ type Stats = {
 };
 
 export default function Overview() {
+  const { schoolId } = useAuth();
   const [stats, setStats] = useState<Stats>({
     total: 0,
     submitted: 0,
@@ -24,15 +26,15 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchStats();
-  }, []);
+    if (schoolId) {
+      fetchStats();
+    }
+  }, [schoolId]);
 
   const fetchStats = async () => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('status, is_safety_related');
-
-    if (!error && data) {
+    if (!schoolId) return;
+    const data = await getTickets(schoolId);
+    if (data) {
       const newStats: Stats = {
         total: data.length,
         submitted: data.filter(t => t.status === 'submitted').length,

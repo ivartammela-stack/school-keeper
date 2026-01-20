@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.lovable.schoolkeeper',
+  appId: 'koolihaldus.app',
   appName: 'Kooli Hooldus',
   webDir: 'dist',
   plugins: {

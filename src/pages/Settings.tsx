@@ -7,7 +7,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Settings as SettingsIcon, Mail, Bell, Flag, Link2, Save } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { logSettingChanged } from '@/lib/audit';
 import { logEvent, AnalyticsEvents } from '@/lib/analytics';
@@ -17,6 +16,13 @@ import {
   RemoteConfigKeys,
 } from '@/lib/remote-config';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  getSystemSettings,
+  updateSystemSetting,
+  getEmailTemplates,
+  updateEmailTemplate as updateEmailTemplateRecord,
+} from '@/lib/firestore';
 
 interface SystemSetting {
   id: string;
@@ -37,25 +43,29 @@ interface EmailTemplate {
 }
 
 export default function Settings() {
+  const { schoolId } = useAuth();
   const [settings, setSettings] = useState<SystemSetting[]>([]);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchSettings();
-    fetchEmailTemplates();
-  }, []);
+    if (schoolId) {
+      fetchSettings();
+      fetchEmailTemplates();
+    }
+  }, [schoolId]);
 
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase
-        .from('system_settings')
-        .select('*')
-        .order('category, key');
-
-      if (error) throw error;
-      setSettings(data || []);
+      if (!schoolId) return;
+      const data = await getSystemSettings(schoolId);
+      const sorted = [...data].sort((a, b) => {
+        const categoryCompare = a.category.localeCompare(b.category);
+        if (categoryCompare !== 0) return categoryCompare;
+        return a.key.localeCompare(b.key);
+      });
+      setSettings(sorted as SystemSetting[]);
     } catch (error) {
       console.error('Error fetching settings:', error);
       toast.error('Viga sätete laadimisel');
@@ -66,13 +76,9 @@ export default function Settings() {
 
   const fetchEmailTemplates = async () => {
     try {
-      const { data, error } = await supabase
-        .from('email_templates')
-        .select('*')
-        .order('name');
-
-      if (error) throw error;
-      setEmailTemplates(data || []);
+      if (!schoolId) return;
+      const data = await getEmailTemplates(schoolId);
+      setEmailTemplates(data as EmailTemplate[]);
     } catch (error) {
       console.error('Error fetching email templates:', error);
       toast.error('Viga e-posti mallide laadimisel');
@@ -84,12 +90,8 @@ export default function Settings() {
     if (!setting) return;
 
     try {
-      const { error } = await supabase
-        .from('system_settings')
-        .update({ value: newValue })
-        .eq('key', key);
-
-      if (error) throw error;
+      if (!schoolId) return;
+      await updateSystemSetting(schoolId, key, newValue);
 
       await logSettingChanged(key, setting.value, newValue);
       await logEvent(AnalyticsEvents.SETTINGS_CHANGED, { setting_key: key });
@@ -104,16 +106,12 @@ export default function Settings() {
 
   const updateEmailTemplate = async (template: EmailTemplate) => {
     try {
-      const { error } = await supabase
-        .from('email_templates')
-        .update({
-          subject: template.subject,
-          body: template.body,
-          enabled: template.enabled,
-        })
-        .eq('id', template.id);
-
-      if (error) throw error;
+      if (!schoolId) return;
+      await updateEmailTemplateRecord(schoolId, template.id, {
+        subject: template.subject,
+        body: template.body,
+        enabled: template.enabled,
+      });
 
       toast.success('E-posti mall uuendatud');
       fetchEmailTemplates();

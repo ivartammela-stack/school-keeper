@@ -1,10 +1,21 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { DateRange } from 'react-day-picker';
-
-import type { Database } from '@/integrations/supabase/types';
-
-type TicketStatus = Database['public']['Enums']['ticket_status'];
+import {
+  getTickets,
+  getCategories,
+  getProblemTypes,
+  getUsersBySchool,
+  updateTicket,
+  updateTicketStatus,
+} from '@/lib/firestore';
+import { getCurrentUser } from '@/lib/firebase-auth';
+import type {
+  Ticket as FirestoreTicket,
+  TicketStatus,
+  Category,
+  ProblemType,
+  User,
+} from '@/lib/firebase-types';
 
 export interface TicketFilters {
   statuses?: string[];
@@ -45,6 +56,49 @@ export interface Ticket {
   closed?: { full_name: string | null };
 }
 
+// Helper to convert Firestore ticket to local format
+function mapTicket(
+  ticket: FirestoreTicket,
+  categories: Category[],
+  problemTypes: ProblemType[],
+  users: User[]
+): Ticket {
+  const category = categories.find((c) => c.id === ticket.category_id);
+  const problemType = problemTypes.find((p) => p.id === ticket.problem_type_id);
+  const creator = users.find((u) => u.id === ticket.created_by);
+  const assignee = users.find((u) => u.id === ticket.assigned_to);
+  const resolver = users.find((u) => u.id === ticket.resolved_by);
+  const closer = users.find((u) => u.id === ticket.closed_by);
+
+  return {
+    id: ticket.id,
+    ticket_number: ticket.ticket_number,
+    category_id: ticket.category_id,
+    problem_type_id: ticket.problem_type_id,
+    location: ticket.location,
+    description: ticket.description || null,
+    status: ticket.status,
+    priority: ticket.priority || 0,
+    created_by: ticket.created_by || '',
+    assigned_to: ticket.assigned_to || null,
+    resolved_by: ticket.resolved_by || null,
+    closed_by: ticket.closed_by || null,
+    is_safety_related: ticket.is_safety_related || false,
+    images: ticket.images || [],
+    created_at: ticket.created_at.toISOString(),
+    updated_at: ticket.updated_at.toISOString(),
+    resolved_at: ticket.resolved_at?.toISOString() || null,
+    verified_at: ticket.verified_at?.toISOString() || null,
+    closed_at: ticket.closed_at?.toISOString() || null,
+    categories: category ? { name: category.name } : undefined,
+    problem_types: problemType ? { name: problemType.name } : undefined,
+    profiles: creator ? { full_name: creator.full_name } : undefined,
+    assigned: assignee ? { full_name: assignee.full_name } : undefined,
+    resolved: resolver ? { full_name: resolver.full_name } : undefined,
+    closed: closer ? { full_name: closer.full_name } : undefined,
+  };
+}
+
 export function useTickets(filters: TicketFilters = {}) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,75 +106,77 @@ export function useTickets(filters: TicketFilters = {}) {
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchTickets = async () => {
+    if (!filters.schoolId) {
+      setTickets([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      let query = supabase
-        .from('tickets')
-        .select(
-          `
-          *,
-          categories:category_id(name),
-          problem_types:problem_type_id(name),
-          profiles:profiles!tickets_created_by_fkey(full_name),
-          assigned:profiles!tickets_assigned_to_fkey(full_name),
-          resolved:profiles!tickets_resolved_by_fkey(full_name),
-          closed:profiles!tickets_closed_by_fkey(full_name)
-        `,
-          { count: 'exact' }
+      // Fetch tickets and lookup data in parallel
+      const [rawTickets, categories, problemTypes, users] = await Promise.all([
+        getTickets(filters.schoolId, {
+          status: filters.statuses?.[0] as TicketStatus | undefined,
+          category_id: filters.categoryId,
+          assigned_to: filters.assignedTo,
+          is_safety_related: filters.isSafetyRelated,
+        }),
+        getCategories(filters.schoolId),
+        getProblemTypes(filters.schoolId),
+        getUsersBySchool(filters.schoolId),
+      ]);
+
+      // Apply client-side filters that Firestore doesn't support well
+      let filteredTickets = rawTickets;
+
+      // Filter by multiple statuses
+      if (filters.statuses && filters.statuses.length > 1) {
+        filteredTickets = filteredTickets.filter((t) =>
+          filters.statuses!.includes(t.status)
         );
-
-      // Apply filters
-      if (filters.statuses && filters.statuses.length > 0) {
-        query = query.in('status', filters.statuses as TicketStatus[]);
       }
 
-      if (filters.categoryId) {
-        query = query.eq('category_id', filters.categoryId);
-      }
-
+      // Filter by problem type
       if (filters.problemTypeId) {
-        query = query.eq('problem_type_id', filters.problemTypeId);
-      }
-
-      if (filters.schoolId) {
-        // Need to join with profiles to filter by school
-        // This is a simplified version - adjust based on your schema
-        query = query.eq('profiles.school_id', filters.schoolId);
-      }
-
-      if (filters.assignedTo) {
-        query = query.eq('assigned_to', filters.assignedTo);
-      }
-
-      if (filters.dateRange?.from) {
-        query = query.gte('created_at', filters.dateRange.from.toISOString());
-      }
-
-      if (filters.dateRange?.to) {
-        query = query.lte('created_at', filters.dateRange.to.toISOString());
-      }
-
-      if (filters.search) {
-        query = query.or(
-          `ticket_number.eq.${filters.search},location.ilike.%${filters.search}%,description.ilike.%${filters.search}%`
+        filteredTickets = filteredTickets.filter(
+          (t) => t.problem_type_id === filters.problemTypeId
         );
       }
 
-      if (filters.isSafetyRelated !== undefined) {
-        query = query.eq('is_safety_related', filters.isSafetyRelated);
+      // Filter by date range
+      if (filters.dateRange?.from) {
+        filteredTickets = filteredTickets.filter(
+          (t) => t.created_at >= filters.dateRange!.from!
+        );
+      }
+      if (filters.dateRange?.to) {
+        filteredTickets = filteredTickets.filter(
+          (t) => t.created_at <= filters.dateRange!.to!
+        );
       }
 
-      // Order by created_at descending
-      query = query.order('created_at', { ascending: false });
+      // Filter by search
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        const searchNum = parseInt(filters.search, 10);
+        filteredTickets = filteredTickets.filter(
+          (t) =>
+            t.ticket_number === searchNum ||
+            t.location.toLowerCase().includes(searchLower) ||
+            t.description?.toLowerCase().includes(searchLower)
+        );
+      }
 
-      const { data, error: fetchError, count } = await query;
+      // Map to local format with relations
+      const mappedTickets = filteredTickets.map((t) =>
+        mapTicket(t, categories, problemTypes, users)
+      );
 
-      if (fetchError) throw fetchError;
-
-      setTickets((data as unknown as Ticket[]) || []);
-      setTotalCount(count || 0);
+      setTickets(mappedTickets);
+      setTotalCount(mappedTickets.length);
     } catch (err) {
       setError(err as Error);
       console.error('Error fetching tickets:', err);
@@ -132,12 +188,13 @@ export function useTickets(filters: TicketFilters = {}) {
   useEffect(() => {
     fetchTickets();
   }, [
-    filters.statuses,
+    filters.statuses?.join(','),
     filters.categoryId,
     filters.problemTypeId,
     filters.schoolId,
     filters.assignedTo,
-    filters.dateRange,
+    filters.dateRange?.from?.toISOString(),
+    filters.dateRange?.to?.toISOString(),
     filters.search,
     filters.isSafetyRelated,
   ]);
@@ -155,51 +212,27 @@ export function useBulkTicketUpdate() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const getCurrentUserId = async () => {
-    const { data } = await supabase.auth.getUser();
-    return data.user?.id ?? null;
+  const getCurrentUserId = () => {
+    const user = getCurrentUser();
+    return user?.uid ?? null;
   };
 
-  const updateStatus = async (ticketIds: string[], newStatus: string) => {
+  const updateStatus = async (
+    schoolId: string,
+    ticketIds: string[],
+    newStatus: string
+  ) => {
     try {
       setLoading(true);
       setError(null);
 
-      const userId = await getCurrentUserId();
-      const updates: Record<string, string | null> = {
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-      };
+      const userId = getCurrentUserId();
 
-      if (newStatus === 'resolved') {
-        updates.resolved_at = new Date().toISOString();
-        updates.resolved_by = userId;
-      }
-
-      if (newStatus === 'verified') {
-        updates.verified_at = new Date().toISOString();
-      }
-
-      if (newStatus === 'closed') {
-        updates.closed_at = new Date().toISOString();
-        updates.closed_by = userId;
-      }
-
-      if (newStatus === 'submitted') {
-        updates.assigned_to = null;
-        updates.resolved_by = null;
-        updates.closed_by = null;
-        updates.resolved_at = null;
-        updates.verified_at = null;
-        updates.closed_at = null;
-      }
-
-      const { error: updateError } = await supabase
-        .from('tickets')
-        .update(updates)
-        .in('id', ticketIds);
-
-      if (updateError) throw updateError;
+      await Promise.all(
+        ticketIds.map((ticketId) =>
+          updateTicketStatus(schoolId, ticketId, newStatus as TicketStatus, userId || undefined)
+        )
+      );
 
       return { success: true };
     } catch (err) {
@@ -210,17 +243,20 @@ export function useBulkTicketUpdate() {
     }
   };
 
-  const assignTo = async (ticketIds: string[], userId: string | null) => {
+  const assignTo = async (
+    schoolId: string,
+    ticketIds: string[],
+    userId: string | null
+  ) => {
     try {
       setLoading(true);
       setError(null);
 
-      const { error: updateError } = await supabase
-        .from('tickets')
-      .update({ assigned_to: userId, updated_at: new Date().toISOString() })
-      .in('id', ticketIds);
-
-      if (updateError) throw updateError;
+      await Promise.all(
+        ticketIds.map((ticketId) =>
+          updateTicket(schoolId, ticketId, { assigned_to: userId })
+        )
+      );
 
       return { success: true };
     } catch (err) {
@@ -231,17 +267,20 @@ export function useBulkTicketUpdate() {
     }
   };
 
-  const updatePriority = async (ticketIds: string[], priority: number) => {
+  const updatePriority = async (
+    schoolId: string,
+    ticketIds: string[],
+    priority: number
+  ) => {
     try {
       setLoading(true);
       setError(null);
 
-      const { error: updateError } = await supabase
-        .from('tickets')
-        .update({ priority, updated_at: new Date().toISOString() })
-        .in('id', ticketIds);
-
-      if (updateError) throw updateError;
+      await Promise.all(
+        ticketIds.map((ticketId) =>
+          updateTicket(schoolId, ticketId, { priority })
+        )
+      );
 
       return { success: true };
     } catch (err) {

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,8 +10,16 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Users, Shield, School, Check, X, Plus, Pencil, Trash2, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
-
-type AppRole = 'teacher' | 'safety_officer' | 'director' | 'worker' | 'facility_manager' | 'admin';
+import {
+  getAllUsers,
+  getSchools,
+  updateUser,
+  createSchool,
+  updateSchool as updateSchoolRecord,
+  deleteSchool as deleteSchoolRecord,
+} from '@/lib/firestore';
+import { deleteUser as deleteFirebaseUser, setUserRole } from '@/lib/firebase-auth';
+import type { AppRole } from '@/lib/firebase-types';
 
 interface UserProfile {
   id: string;
@@ -67,92 +74,56 @@ export default function Admin() {
   const fetchData = async () => {
     setLoading(true);
     
-    // Fetch users with their roles
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, email, full_name, school_id, created_at')
-      .order('created_at', { ascending: false });
+    try {
+      const [profiles, schoolsData] = await Promise.all([
+        getAllUsers(),
+        getSchools(),
+      ]);
 
-    if (profilesError) {
-      toast.error('Viga kasutajate laadimisel');
-      console.error(profilesError);
+      const usersWithRoles: UserProfile[] = profiles.map((profile) => ({
+        id: profile.id,
+        email: profile.email || null,
+        full_name: profile.full_name || null,
+        school_id: profile.school_id || null,
+        created_at: profile.created_at.toISOString(),
+        roles: profile.role ? [profile.role] : [],
+      }));
+
+      setUsers(usersWithRoles);
+
+      setSchools(
+        schoolsData.map((school) => ({
+          id: school.id,
+          name: school.name,
+          code: school.code || null,
+        }))
+      );
+    } catch (error) {
+      toast.error('Viga andmete laadimisel');
+      console.error(error);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Fetch all roles
-    const { data: allRoles, error: rolesError } = await supabase
-      .from('user_roles')
-      .select('user_id, role');
-
-    if (rolesError) {
-      toast.error('Viga rollide laadimisel');
-      console.error(rolesError);
-    }
-
-    // Map roles to users
-    const usersWithRoles: UserProfile[] = (profiles || []).map(profile => ({
-      ...profile,
-      roles: (allRoles || [])
-        .filter(r => r.user_id === profile.id)
-        .map(r => r.role as AppRole)
-    }));
-
-    setUsers(usersWithRoles);
-
-    // Fetch schools
-    const { data: schoolsData } = await supabase
-      .from('schools')
-      .select('id, name, code')
-      .order('name');
-
-    setSchools(schoolsData || []);
-    setLoading(false);
   };
 
   const toggleRole = async (userId: string, role: AppRole, hasRole: boolean) => {
-    if (hasRole) {
-      // Remove role
-      const { error } = await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', userId)
-        .eq('role', role);
-
-      if (error) {
-        toast.error('Viga rolli eemaldamisel');
-        return;
-      }
-      toast.success('Roll eemaldatud');
-    } else {
-      // Add role
-      const { error } = await supabase
-        .from('user_roles')
-        .insert({ user_id: userId, role });
-
-      if (error) {
-        toast.error('Viga rolli lisamisel');
-        return;
-      }
-      toast.success('Roll lisatud');
+    try {
+      await setUserRole(userId, hasRole ? null : role);
+      toast.success(hasRole ? 'Roll eemaldatud' : 'Roll lisatud');
+      fetchData();
+    } catch (error) {
+      toast.error('Viga rolli muutmisel');
     }
-
-    fetchData();
   };
 
   const updateSchool = async (userId: string, schoolId: string | null) => {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ school_id: schoolId === 'none' ? null : schoolId })
-      .eq('id', userId);
-
-    if (error) {
+    try {
+      await updateUser(userId, { school_id: schoolId === 'none' ? null : schoolId });
+      toast.success('Kool määratud');
+      fetchData();
+    } catch (error) {
       toast.error('Viga kooli määramisel');
-      return;
     }
-    
-    toast.success('Kool määratud');
-    fetchData();
   };
 
   const openSchoolDialog = (school?: SchoolData) => {
@@ -176,15 +147,12 @@ export default function Admin() {
 
     if (editingSchool) {
       // Update existing school
-      const { error } = await supabase
-        .from('schools')
-        .update({ 
-          name: schoolName.trim(), 
-          code: schoolCode.trim() || null 
-        })
-        .eq('id', editingSchool.id);
-
-      if (error) {
+      try {
+        await updateSchoolRecord(editingSchool.id, {
+          name: schoolName.trim(),
+          code: schoolCode.trim() || null,
+        });
+      } catch (error) {
         toast.error('Viga kooli uuendamisel');
         console.error(error);
         return;
@@ -192,19 +160,13 @@ export default function Admin() {
       toast.success('Kool uuendatud');
     } else {
       // Create new school
-      const { error } = await supabase
-        .from('schools')
-        .insert({ 
-          name: schoolName.trim(), 
-          code: schoolCode.trim() || null 
+      try {
+        await createSchool({
+          name: schoolName.trim(),
+          code: schoolCode.trim() || null,
         });
-
-      if (error) {
-        if (error.code === '23505') {
-          toast.error('Selle koodiga kool on juba olemas');
-        } else {
-          toast.error('Viga kooli lisamisel');
-        }
+      } catch (error) {
+        toast.error('Viga kooli lisamisel');
         console.error(error);
         return;
       }
@@ -226,12 +188,9 @@ export default function Admin() {
       return;
     }
 
-    const { error } = await supabase
-      .from('schools')
-      .delete()
-      .eq('id', schoolId);
-
-    if (error) {
+    try {
+      await deleteSchoolRecord(schoolId);
+    } catch (error) {
       toast.error('Viga kooli kustutamisel');
       console.error(error);
       return;
@@ -245,21 +204,7 @@ export default function Admin() {
     setDeletingUserId(userId);
     
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error('Pole sisse logitud');
-        return;
-      }
-
-      const response = await supabase.functions.invoke('delete-user', {
-        body: { userId }
-      });
-
-      if (response.error) {
-        toast.error(response.error.message || 'Viga kasutaja kustutamisel');
-        return;
-      }
-
+      await deleteFirebaseUser(userId);
       toast.success('Kasutaja kustutatud');
       fetchData();
     } catch (error) {
@@ -375,7 +320,7 @@ export default function Admin() {
                       <p className="font-medium">{user.full_name || 'Nimetu'}</p>
                       <p className="text-sm text-muted-foreground">{user.email}</p>
                     </div>
-                    {user.id !== currentUser?.id && (
+                    {user.id !== currentUser?.uid && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
