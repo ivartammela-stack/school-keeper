@@ -9,7 +9,7 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ children, showBottomNav = true }: AppLayoutProps) {
-  const { user, loading, roles, isDemo } = useAuth();
+  const { user, loading, roles, isDemo, schoolId, memberships } = useAuth();
 
   if (loading) {
     return (
@@ -23,6 +23,26 @@ export function AppLayout({ children, showBottomNav = true }: AppLayoutProps) {
   if (!isDemo) {
     if (!user) {
       return <Navigate to="/auth" replace />;
+    }
+
+    const hasActiveMembership = memberships.some((m) => m.status === 'active');
+
+    if (!schoolId) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+          <div className="text-center space-y-4">
+            <div className="text-6xl">🏫</div>
+            <h2 className="text-xl font-semibold">
+              {hasActiveMembership ? 'Vali aktiivne kool' : 'Ootame administraatori kinnitust'}
+            </h2>
+            <p className="text-muted-foreground max-w-sm">
+              {hasActiveMembership
+                ? 'Vali Profiili lehelt, millise kooli andmeid soovid kasutada.'
+                : 'Sinu konto on loodud, kuid administraator peab sulle rolli määrama.'}
+            </p>
+          </div>
+        </div>
+      );
     }
 
     // Show waiting screen if user has no roles assigned yet

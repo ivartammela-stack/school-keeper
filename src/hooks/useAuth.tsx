@@ -5,12 +5,20 @@ import {
   signInWithEmail,
   signUpWithEmail,
   signOut as firebaseSignOut,
-  getUserClaims,
 } from '@/lib/firebase-auth';
-import { getUser, createUser, getSchools, getSchool, updateUser, initializeSchoolLookups } from '@/lib/firestore';
+import {
+  getUser,
+  createUser,
+  updateUser,
+  getUserMemberships,
+  getSchool,
+  setActiveSchool,
+  initializeGlobalCatalogs,
+  updateSchoolMember,
+} from '@/lib/firestore';
 import { logger } from '@/lib/logger';
 import { initializePushNotifications, unregisterPushNotifications } from '@/lib/push-notifications';
-import type { AppRole, User } from '@/lib/firebase-types';
+import type { AppRole, User, School, SchoolMember } from '@/lib/firebase-types';
 
 // DEMO MODE - set to false to enable real authentication
 const DEMO_MODE = false;
@@ -28,6 +36,9 @@ const DEMO_FIREBASE_USER = {
 interface AuthContextType {
   user: FirebaseUser | null;
   profile: User | null;
+  memberships: SchoolMember[];
+  schools: School[];
+  activeMembership: SchoolMember | null;
   roles: AppRole[];
   loading: boolean;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
@@ -37,6 +48,7 @@ interface AuthContextType {
   hasAnyRole: (roles: AppRole[]) => boolean;
   isDemo: boolean;
   schoolId: string | null;
+  setActiveSchoolId: (schoolId: string | null) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -47,6 +59,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>(DEMO_MODE ? DEMO_ROLES : []);
   const [loading, setLoading] = useState(!DEMO_MODE);
   const [schoolId, setSchoolId] = useState<string | null>(null);
+  const [memberships, setMemberships] = useState<SchoolMember[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [activeMembership, setActiveMembership] = useState<SchoolMember | null>(null);
 
   useEffect(() => {
     // Skip auth setup in demo mode
@@ -61,10 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (firebaseUser) {
         // Fetch user profile and roles
         try {
-          let [userProfile, claims] = await Promise.all([
-            getUser(firebaseUser.uid),
-            getUserClaims(),
-          ]);
+          let userProfile = await getUser(firebaseUser.uid);
 
           if (!userProfile) {
             await createUser(firebaseUser.uid, {
@@ -72,83 +84,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               email: firebaseUser.email,
               full_name: firebaseUser.displayName || null,
               avatar_url: firebaseUser.photoURL || null,
-              school_id: null,
+              active_school_id: null,
               created_at: new Date(),
             });
             userProfile = await getUser(firebaseUser.uid);
           }
 
-          // Sync role from claims into Firestore if needed
-          const profileRole = userProfile?.role || null;
-          const claimsRole = claims?.role || null;
+          const memberList = await getUserMemberships(firebaseUser.uid);
+          setMemberships(memberList);
 
-          if (!profileRole && claimsRole) {
-            try {
-              await updateUser(firebaseUser.uid, { role: claimsRole });
+          const activeSchoolId = userProfile?.active_school_id || null;
+          let active = activeSchoolId
+            ? memberList.find((m) => m.school_id === activeSchoolId && m.status === 'active')
+            : null;
+
+          if (!active) {
+            const activeMembers = memberList.filter((m) => m.status === 'active');
+            if (activeMembers.length === 1) {
+              active = activeMembers[0];
+              await setActiveSchool(firebaseUser.uid, active.school_id);
               userProfile = await getUser(firebaseUser.uid);
-            } catch (error) {
-              logger.warn('Failed to sync Firestore role from claims', error);
-            }
-          }
-
-          // Validate and fix school_id for admin users
-          let validSchoolId = userProfile?.school_id || claims?.school_id || null;
-
-          if (validSchoolId) {
-            // Check if the school actually exists
-            const school = await getSchool(validSchoolId);
-            if (!school) {
-              logger.warn('User school_id does not exist, will reassign', { school_id: validSchoolId });
-              validSchoolId = null;
-            }
-          }
-
-          // Auto-assign school when missing (single-school safe default)
-          const isAdmin = userProfile?.role === 'admin' || claims?.role === 'admin';
-          if (!validSchoolId) {
-            try {
-              const schools = await getSchools();
-              if (schools.length === 1) {
-                validSchoolId = schools[0].id;
-                await updateUser(firebaseUser.uid, { school_id: validSchoolId });
-                userProfile = await getUser(firebaseUser.uid);
-                logger.info('Auto-assigned school to user', { school_id: validSchoolId });
-              } else if (isAdmin && schools.length > 0) {
-                validSchoolId = schools[0].id;
-                await updateUser(firebaseUser.uid, { school_id: validSchoolId });
-                userProfile = await getUser(firebaseUser.uid);
-                logger.info('Auto-assigned school to admin', { school_id: validSchoolId });
-              }
-            } catch (error) {
-              logger.warn('Failed to auto-assign school', error);
+            } else {
+              active = null;
             }
           }
 
           setProfile(userProfile);
-          setSchoolId(validSchoolId);
+          setActiveMembership(active);
+          setSchoolId(active?.school_id || null);
+          setRoles(active?.roles || []);
 
-          // Initialize lookups for admin users (creates default categories/problem types)
-          if (validSchoolId && isAdmin) {
-            try {
-              const initialized = await initializeSchoolLookups(validSchoolId);
-              if (initialized) {
-                logger.info('Initialized default lookups for school', { school_id: validSchoolId });
-              }
-            } catch (error) {
-              logger.warn('Failed to initialize lookups', error);
-            }
+          const schoolSnapshots = await Promise.all(
+            memberList.map((m) => getSchool(m.school_id))
+          );
+          setSchools(schoolSnapshots.filter(Boolean) as School[]);
+
+          try {
+            await initializeGlobalCatalogs();
+          } catch (error) {
+            logger.warn('Failed to initialize global catalogs', error);
           }
 
-          // Prefer roles from profile (Firestore), fallback to single role or claims
-          if (userProfile?.roles && userProfile.roles.length > 0) {
-            setRoles(userProfile.roles);
-          } else if (userProfile?.role) {
-            setRoles([userProfile.role]);
-          } else if (claims?.role) {
-            setRoles([claims.role]);
-          } else {
-            setRoles([]);
-          }
+          // Sync profile fields to membership docs (safe fields only)
+          const profilePayload = {
+            email: userProfile?.email || null,
+            full_name: userProfile?.full_name || null,
+            avatar_url: userProfile?.avatar_url || null,
+          };
+          await Promise.all(
+            memberList.map((m) =>
+              updateSchoolMember(m.school_id, firebaseUser.uid, profilePayload)
+            )
+          );
 
           // Initialize push notifications for logged in user
           initializePushNotifications(firebaseUser.uid);
@@ -157,11 +144,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           logger.error('Error fetching user data', error);
           setRoles([]);
           setProfile(null);
+          setMemberships([]);
+          setSchools([]);
+          setActiveMembership(null);
         }
       } else {
         setRoles([]);
         setProfile(null);
         setSchoolId(null);
+        setMemberships([]);
+        setSchools([]);
+        setActiveMembership(null);
       }
 
       setLoading(false);
@@ -197,16 +190,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRoles([]);
     setProfile(null);
     setSchoolId(null);
+    setMemberships([]);
+    setSchools([]);
+    setActiveMembership(null);
   };
 
   const hasRole = (role: AppRole) => roles.includes(role);
   const hasAnyRole = (checkRoles: AppRole[]) => checkRoles.some((r) => roles.includes(r));
+
+  const setActiveSchoolId = async (nextSchoolId: string | null) => {
+    if (!user) return;
+    await setActiveSchool(user.uid, nextSchoolId);
+    setSchoolId(nextSchoolId);
+    setProfile((prev) => (prev ? { ...prev, active_school_id: nextSchoolId } : prev));
+    const nextMember = memberships.find((m) => m.school_id === nextSchoolId) || null;
+    setActiveMembership(nextMember);
+    setRoles(nextMember?.roles || []);
+  };
 
   return (
     <AuthContext.Provider
       value={{
         user,
         profile,
+        memberships,
+        schools,
+        activeMembership,
         roles,
         loading,
         signUp,
@@ -216,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasAnyRole,
         isDemo: DEMO_MODE,
         schoolId,
+        setActiveSchoolId,
       }}
     >
       {children}

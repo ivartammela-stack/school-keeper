@@ -4,8 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { User, LogOut, Moon, Sun, Mail, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { getSchools, requestSchoolMembership } from '@/lib/firestore';
+import { toast } from 'sonner';
 
 const roleLabels: Record<string, string> = {
   teacher: 'Õpetaja',
@@ -26,8 +29,32 @@ const roleColors: Record<string, string> = {
 };
 
 export default function Profile() {
-  const { user, roles, signOut } = useAuth();
+  const { user, roles, signOut, memberships, schools, schoolId, setActiveSchoolId } = useAuth();
   const [isDark, setIsDark] = useState(false);
+  const [availableSchools, setAvailableSchools] = useState<{ id: string; name: string }[]>([]);
+  const [selectedSchool, setSelectedSchool] = useState<string>('');
+  const [loadingSchools, setLoadingSchools] = useState(false);
+  const activeMemberships = memberships.filter((m) => m.status === 'active');
+  const hasMemberships = memberships.length > 0;
+
+  useEffect(() => {
+    if (hasMemberships) return;
+    const loadSchools = async () => {
+      setLoadingSchools(true);
+      try {
+        const data = await getSchools();
+        setAvailableSchools(data.map((s) => ({ id: s.id, name: s.name })));
+        if (!selectedSchool && data.length > 0) {
+          setSelectedSchool(data[0].id);
+        }
+      } catch (error) {
+        toast.error('Koolide laadimine ebaõnnestus');
+      } finally {
+        setLoadingSchools(false);
+      }
+    };
+    void loadSchools();
+  }, [hasMemberships, selectedSchool]);
 
   useEffect(() => {
     // Check initial theme
@@ -95,6 +122,78 @@ export default function Profile() {
             <p className="text-muted-foreground text-sm">Rolle pole määratud</p>
           )}
         </div>
+      </Card>
+
+      {/* Active School */}
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Shield className="h-5 w-5 text-muted-foreground" />
+          <h2 className="font-semibold">Aktiivne kool</h2>
+        </div>
+        {activeMemberships.length === 0 ? (
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-sm">
+              {hasMemberships ? 'Kinnitust pole veel' : 'Vali kool ja taotle liitumist'}
+            </p>
+            {!hasMemberships && (
+              <>
+                <Select
+                  value={selectedSchool}
+                  onValueChange={(value) => setSelectedSchool(value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={loadingSchools ? 'Laen...' : 'Vali kool'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableSchools.map((school) => (
+                      <SelectItem key={school.id} value={school.id}>
+                        {school.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  disabled={!selectedSchool}
+                  onClick={async () => {
+                    if (!user) return;
+                    try {
+                      await requestSchoolMembership(selectedSchool, {
+                        id: user.uid,
+                        email: user.email || null,
+                        full_name: user.displayName || null,
+                        avatar_url: user.photoURL || null,
+                      });
+                      toast.success('Taotlus saadetud');
+                    } catch (error) {
+                      toast.error('Taotluse saatmine ebaõnnestus');
+                    }
+                  }}
+                >
+                  Taotle liitumist
+                </Button>
+              </>
+            )}
+          </div>
+        ) : (
+          <Select
+            value={schoolId || ''}
+            onValueChange={(value) => setActiveSchoolId(value || null)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Vali kool" />
+            </SelectTrigger>
+            <SelectContent>
+              {activeMemberships.map((member) => {
+                const school = schools.find((s) => s.id === member.school_id);
+                return (
+                  <SelectItem key={member.school_id} value={member.school_id}>
+                    {school?.name || member.school_id}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        )}
       </Card>
 
       {/* Settings */}

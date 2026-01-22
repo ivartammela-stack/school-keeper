@@ -1,5 +1,6 @@
 import {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -20,11 +21,14 @@ import {
   writeBatch,
   increment,
   serverTimestamp,
+  documentId,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type {
   User,
   AppRole,
+  SchoolMember,
+  MembershipStatus,
   School,
   Ticket,
   TicketComment,
@@ -91,13 +95,159 @@ export async function updateUser(userId: string, userData: Partial<User>): Promi
   });
 }
 
-export async function getUsersBySchool(schoolId: string): Promise<User[]> {
-  const q = query(collection(db!, 'users'), where('school_id', '==', schoolId));
+export async function setActiveSchool(userId: string, schoolId: string | null): Promise<void> {
+  await updateUser(userId, { active_school_id: schoolId });
+}
+
+export async function getUserMemberships(userId: string): Promise<SchoolMember[]> {
+  const membersRef = collectionGroup(db!, 'members');
+  const q = query(membersRef, where(documentId(), '==', userId));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({
-    id: d.id,
-    ...d.data(),
-    created_at: toDate(d.data().created_at) || new Date(),
+
+  return snapshot.docs.map((d) => {
+    const data = d.data();
+    const schoolId = d.ref.parent.parent?.id || '';
+    return {
+      id: d.id,
+      user_id: d.id,
+      school_id: schoolId,
+      roles: Array.isArray(data.roles) ? data.roles : [],
+      status: (data.status || 'pending') as MembershipStatus,
+      email: data.email || null,
+      full_name: data.full_name || null,
+      avatar_url: data.avatar_url || null,
+      created_at: toDate(data.created_at) || new Date(),
+      updated_at: toDate(data.updated_at),
+    } as SchoolMember;
+  });
+}
+
+export async function getSchoolMembers(schoolId: string): Promise<SchoolMember[]> {
+  const membersRef = collection(db!, 'schools', schoolId, 'members');
+  const snapshot = await getDocs(membersRef);
+  return snapshot.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      user_id: d.id,
+      school_id: schoolId,
+      roles: Array.isArray(data.roles) ? data.roles : [],
+      status: (data.status || 'pending') as MembershipStatus,
+      email: data.email || null,
+      full_name: data.full_name || null,
+      avatar_url: data.avatar_url || null,
+      created_at: toDate(data.created_at) || new Date(),
+      updated_at: toDate(data.updated_at),
+    } as SchoolMember;
+  });
+}
+
+export async function getSchoolMember(
+  schoolId: string,
+  userId: string
+): Promise<SchoolMember | null> {
+  const docRef = doc(db!, 'schools', schoolId, 'members', userId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return null;
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    user_id: docSnap.id,
+    school_id: schoolId,
+    roles: Array.isArray(data.roles) ? data.roles : [],
+    status: (data.status || 'pending') as MembershipStatus,
+    email: data.email || null,
+    full_name: data.full_name || null,
+    avatar_url: data.avatar_url || null,
+    created_at: toDate(data.created_at) || new Date(),
+    updated_at: toDate(data.updated_at),
+  } as SchoolMember;
+}
+
+export async function upsertSchoolMember(
+  schoolId: string,
+  userId: string,
+  data: Partial<SchoolMember>
+): Promise<void> {
+  const docRef = doc(db!, 'schools', schoolId, 'members', userId);
+  const existing = await getDoc(docRef);
+  const createdAt = existing.exists ? existing.data()?.created_at : null;
+  await setDoc(
+    docRef,
+    {
+      user_id: userId,
+      school_id: schoolId,
+      ...data,
+      updated_at: serverTimestamp(),
+      created_at: data.created_at || createdAt || serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+export async function updateSchoolMember(
+  schoolId: string,
+  userId: string,
+  data: Partial<SchoolMember>
+): Promise<void> {
+  const docRef = doc(db!, 'schools', schoolId, 'members', userId);
+  await updateDoc(docRef, {
+    ...data,
+    updated_at: serverTimestamp(),
+  });
+}
+
+export async function setMemberStatus(
+  schoolId: string,
+  userId: string,
+  status: MembershipStatus
+): Promise<void> {
+  await updateSchoolMember(schoolId, userId, { status });
+}
+
+export async function setMemberRoles(
+  schoolId: string,
+  userId: string,
+  roles: AppRole[]
+): Promise<void> {
+  await updateSchoolMember(schoolId, userId, { roles });
+}
+
+export async function requestSchoolMembership(
+  schoolId: string,
+  user: { id: string; email: string | null; full_name: string | null; avatar_url: string | null }
+): Promise<void> {
+  const docRef = doc(db!, 'schools', schoolId, 'members', user.id);
+  const existing = await getDoc(docRef);
+  if (existing.exists()) return;
+  await setDoc(
+    docRef,
+    {
+      user_id: user.id,
+      school_id: schoolId,
+      email: user.email || null,
+      full_name: user.full_name || null,
+      avatar_url: user.avatar_url || null,
+      roles: [],
+      status: 'pending',
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+export async function getUsersBySchool(schoolId: string): Promise<User[]> {
+  const members = await getSchoolMembers(schoolId);
+  const activeMembers = members.filter((member) => member.status === 'active');
+  return activeMembers.map((member) => ({
+    id: member.user_id,
+    email: member.email || null,
+    full_name: member.full_name || null,
+    avatar_url: member.avatar_url || null,
+    active_school_id: schoolId,
+    created_at: member.created_at,
+    updated_at: member.updated_at || undefined,
   })) as User[];
 }
 
@@ -129,8 +279,8 @@ export async function getSchool(schoolId: string): Promise<School | null> {
   return {
     id: docSnap.id,
     ...data,
-    created_at: toDate(data.createdAt) || new Date(),
-    updated_at: toDate(data.updatedAt),
+    created_at: toDate(data.created_at) || new Date(),
+    updated_at: toDate(data.updated_at),
   } as School;
 }
 
@@ -139,7 +289,7 @@ export async function getSchools(): Promise<School[]> {
   return snapshot.docs.map((d) => ({
     id: d.id,
     ...d.data(),
-    created_at: toDate(d.data().createdAt) || new Date(),
+    created_at: toDate(d.data().created_at) || new Date(),
   })) as School[];
 }
 
@@ -147,9 +297,9 @@ export async function createSchool(data: { name: string; code?: string | null })
   const docRef = await addDoc(collection(db!, 'schools'), {
     name: data.name,
     code: data.code || null,
-    ticketCounter: 0,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    ticket_counter: 0,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
   });
   return docRef.id;
 }
@@ -158,7 +308,7 @@ export async function updateSchool(schoolId: string, data: { name?: string; code
   const docRef = doc(db!, 'schools', schoolId);
   await updateDoc(docRef, {
     ...data,
-    updatedAt: serverTimestamp(),
+    updated_at: serverTimestamp(),
   });
 }
 
@@ -239,7 +389,7 @@ export async function createTicket(
   // Get next ticket number
   const counterRef = doc(db!, 'schools', schoolId);
   const counterSnap = await getDoc(counterRef);
-  const currentNumber = counterSnap.data()?.ticketCounter || 0;
+  const currentNumber = counterSnap.data()?.ticket_counter || 0;
   const nextNumber = currentNumber + 1;
 
   // Create ticket and update counter in batch
@@ -253,7 +403,7 @@ export async function createTicket(
     updated_at: serverTimestamp(),
   });
 
-  batch.update(counterRef, { ticketCounter: increment(1) });
+  batch.update(counterRef, { ticket_counter: increment(1) });
 
   await batch.commit();
   return newTicketRef.id;
@@ -403,87 +553,142 @@ export async function addTicketComment(
 // ==================== CATEGORIES & PROBLEM TYPES ====================
 
 export async function getCategories(schoolId: string): Promise<Category[]> {
-  const docRef = doc(db!, 'schools', schoolId, 'lookups', 'categories');
-  const docSnap = await getDoc(docRef);
-  if (!docSnap.exists()) return [];
-  const data = docSnap.data();
-  return (data.items || []) as Category[];
+  const globalRef = collection(db!, 'catalogs', 'global', 'categories');
+  const schoolRef = collection(db!, 'schools', schoolId, 'catalogs', 'local', 'categories');
+  const [globalSnap, schoolSnap] = await Promise.all([
+    getDocs(globalRef),
+    getDocs(schoolRef),
+  ]);
+
+  const merged = new Map<string, Category>();
+  globalSnap.docs.forEach((d) => {
+    const data = d.data();
+    merged.set(d.id, {
+      id: d.id,
+      ...data,
+      created_at: toDate(data.created_at) || new Date(),
+    } as Category);
+  });
+  schoolSnap.docs.forEach((d) => {
+    const data = d.data();
+    merged.set(d.id, {
+      id: d.id,
+      ...data,
+      created_at: toDate(data.created_at) || new Date(),
+    } as Category);
+  });
+
+  return Array.from(merged.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 }
 
 export async function getProblemTypes(schoolId: string): Promise<ProblemType[]> {
-  const docRef = doc(db!, 'schools', schoolId, 'lookups', 'problemTypes');
-  const docSnap = await getDoc(docRef);
-  if (!docSnap.exists()) return [];
-  const data = docSnap.data();
-  return (data.items || []) as ProblemType[];
+  const globalRef = collection(db!, 'catalogs', 'global', 'problemTypes');
+  const schoolRef = collection(db!, 'schools', schoolId, 'catalogs', 'local', 'problemTypes');
+  const [globalSnap, schoolSnap] = await Promise.all([
+    getDocs(globalRef),
+    getDocs(schoolRef),
+  ]);
+
+  const merged = new Map<string, ProblemType>();
+  globalSnap.docs.forEach((d) => {
+    const data = d.data();
+    merged.set(d.id, {
+      id: d.id,
+      ...data,
+      created_at: toDate(data.created_at) || new Date(),
+    } as ProblemType);
+  });
+  schoolSnap.docs.forEach((d) => {
+    const data = d.data();
+    merged.set(d.id, {
+      id: d.id,
+      ...data,
+      created_at: toDate(data.created_at) || new Date(),
+    } as ProblemType);
+  });
+
+  return Array.from(merged.values()).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 }
 
-export async function updateCategories(schoolId: string, categories: Category[]): Promise<void> {
-  const docRef = doc(db!, 'schools', schoolId, 'lookups', 'categories');
-  await updateDoc(docRef, { items: categories, updated_at: serverTimestamp() });
+export async function upsertSchoolCategory(schoolId: string, category: Category): Promise<void> {
+  const docRef = doc(db!, 'schools', schoolId, 'catalogs', 'local', 'categories', category.id);
+  await setDoc(docRef, {
+    ...category,
+    created_at: category.created_at || serverTimestamp(),
+    updated_at: serverTimestamp(),
+  }, { merge: true });
 }
 
-export async function updateProblemTypes(
-  schoolId: string,
-  problemTypes: ProblemType[]
-): Promise<void> {
-  const docRef = doc(db!, 'schools', schoolId, 'lookups', 'problemTypes');
-  await updateDoc(docRef, { items: problemTypes, updated_at: serverTimestamp() });
+export async function upsertSchoolProblemType(schoolId: string, problemType: ProblemType): Promise<void> {
+  const docRef = doc(db!, 'schools', schoolId, 'catalogs', 'local', 'problemTypes', problemType.id);
+  await setDoc(docRef, {
+    ...problemType,
+    created_at: problemType.created_at || serverTimestamp(),
+    updated_at: serverTimestamp(),
+  }, { merge: true });
 }
 
-// Initialize default categories and problem types for a school if they don't exist
-export async function initializeSchoolLookups(schoolId: string): Promise<boolean> {
-  const categoriesRef = doc(db!, 'schools', schoolId, 'lookups', 'categories');
-  const problemTypesRef = doc(db!, 'schools', schoolId, 'lookups', 'problemTypes');
-
+export async function initializeGlobalCatalogs(): Promise<boolean> {
+  const categoriesRef = collection(db!, 'catalogs', 'global', 'categories');
+  const problemTypesRef = collection(db!, 'catalogs', 'global', 'problemTypes');
   const [categoriesSnap, problemTypesSnap] = await Promise.all([
-    getDoc(categoriesRef),
-    getDoc(problemTypesRef),
+    getDocs(categoriesRef),
+    getDocs(problemTypesRef),
   ]);
 
   let initialized = false;
 
-  // Default categories
-  if (!categoriesSnap.exists() || !categoriesSnap.data()?.items?.length) {
+  if (categoriesSnap.empty) {
     const defaultCategories: Category[] = [
-      { id: 'cat-1', name: 'Hoone ja territoorium', description: 'Hoone ja territooriumi probleemid', icon: 'building', sort_order: 1 },
-      { id: 'cat-2', name: 'Tehnika ja seadmed', description: 'Tehnika ja seadmete probleemid', icon: 'wrench', sort_order: 2 },
-      { id: 'cat-3', name: 'Ohutus ja töökeskkond', description: 'Ohutuse ja töökeskkonna probleemid', icon: 'shield-alert', sort_order: 3 },
-      { id: 'cat-4', name: 'Inventar ja mööbel', description: 'Inventari ja mööbli probleemid', icon: 'package', sort_order: 4 },
+      { id: 'cat-1', name: 'Hoone ja territoorium', description: 'Hoone ja territooriumi probleemid', icon: 'building', sort_order: 1, created_at: new Date() },
+      { id: 'cat-2', name: 'Tehnika ja seadmed', description: 'Tehnika ja seadmete probleemid', icon: 'wrench', sort_order: 2, created_at: new Date() },
+      { id: 'cat-3', name: 'Ohutus ja töökeskkond', description: 'Ohutuse ja töökeskkonna probleemid', icon: 'shield-alert', sort_order: 3, created_at: new Date() },
+      { id: 'cat-4', name: 'Inventar ja mööbel', description: 'Inventari ja mööbli probleemid', icon: 'package', sort_order: 4, created_at: new Date() },
     ];
-    await setDoc(categoriesRef, { items: defaultCategories, updated_at: serverTimestamp() });
+    const batch = writeBatch(db!);
+    defaultCategories.forEach((cat) => {
+      batch.set(doc(categoriesRef, cat.id), {
+        ...cat,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+      });
+    });
+    await batch.commit();
     initialized = true;
   }
 
-  // Default problem types
-  if (!problemTypesSnap.exists() || !problemTypesSnap.data()?.items?.length) {
+  if (problemTypesSnap.empty) {
     const defaultProblemTypes: ProblemType[] = [
-      // Hoone ja territoorium
-      { id: 'pt-1', category_id: 'cat-1', code: 'H01', name: 'Katus lekib', sort_order: 1 },
-      { id: 'pt-2', category_id: 'cat-1', code: 'H02', name: 'Aken katki', sort_order: 2 },
-      { id: 'pt-3', category_id: 'cat-1', code: 'H03', name: 'Uks ei sulgu', sort_order: 3 },
-      { id: 'pt-4', category_id: 'cat-1', code: 'H04', name: 'Valgustus ei tööta', sort_order: 4 },
-      { id: 'pt-5', category_id: 'cat-1', code: 'H05', name: 'Kütte probleem', sort_order: 5 },
-      { id: 'pt-6', category_id: 'cat-1', code: 'H06', name: 'Vesi ei jookse', sort_order: 6 },
-      { id: 'pt-7', category_id: 'cat-1', code: 'H07', name: 'WC ummistunud', sort_order: 7 },
-      { id: 'pt-8', category_id: 'cat-1', code: 'H08', name: 'Muu hoone probleem', sort_order: 8 },
-      // Tehnika
-      { id: 'pt-10', category_id: 'cat-2', code: 'T01', name: 'Arvuti ei tööta', sort_order: 1 },
-      { id: 'pt-11', category_id: 'cat-2', code: 'T02', name: 'Projektor ei tööta', sort_order: 2 },
-      { id: 'pt-12', category_id: 'cat-2', code: 'T03', name: 'Internet ei tööta', sort_order: 3 },
-      { id: 'pt-13', category_id: 'cat-2', code: 'T04', name: 'Muu tehnika probleem', sort_order: 4 },
-      // Ohutus
-      { id: 'pt-20', category_id: 'cat-3', code: 'O01', name: 'Tuleohu oht', sort_order: 1 },
-      { id: 'pt-21', category_id: 'cat-3', code: 'O02', name: 'Libedus', sort_order: 2 },
-      { id: 'pt-22', category_id: 'cat-3', code: 'O03', name: 'Terav ese', sort_order: 3 },
-      { id: 'pt-23', category_id: 'cat-3', code: 'O04', name: 'Muu ohutusprobleem', sort_order: 4 },
-      // Inventar
-      { id: 'pt-30', category_id: 'cat-4', code: 'I01', name: 'Tool katki', sort_order: 1 },
-      { id: 'pt-31', category_id: 'cat-4', code: 'I02', name: 'Laud katki', sort_order: 2 },
-      { id: 'pt-32', category_id: 'cat-4', code: 'I03', name: 'Kapp katki', sort_order: 3 },
-      { id: 'pt-33', category_id: 'cat-4', code: 'I04', name: 'Muu inventari probleem', sort_order: 4 },
+      { id: 'pt-1', category_id: 'cat-1', code: 'H01', name: 'Katus lekib', sort_order: 1, created_at: new Date() },
+      { id: 'pt-2', category_id: 'cat-1', code: 'H02', name: 'Aken katki', sort_order: 2, created_at: new Date() },
+      { id: 'pt-3', category_id: 'cat-1', code: 'H03', name: 'Uks ei sulgu', sort_order: 3, created_at: new Date() },
+      { id: 'pt-4', category_id: 'cat-1', code: 'H04', name: 'Valgustus ei tööta', sort_order: 4, created_at: new Date() },
+      { id: 'pt-5', category_id: 'cat-1', code: 'H05', name: 'Kütte probleem', sort_order: 5, created_at: new Date() },
+      { id: 'pt-6', category_id: 'cat-1', code: 'H06', name: 'Vesi ei jookse', sort_order: 6, created_at: new Date() },
+      { id: 'pt-7', category_id: 'cat-1', code: 'H07', name: 'WC ummistunud', sort_order: 7, created_at: new Date() },
+      { id: 'pt-8', category_id: 'cat-1', code: 'H08', name: 'Muu hoone probleem', sort_order: 8, created_at: new Date() },
+      { id: 'pt-10', category_id: 'cat-2', code: 'T01', name: 'Arvuti ei tööta', sort_order: 1, created_at: new Date() },
+      { id: 'pt-11', category_id: 'cat-2', code: 'T02', name: 'Projektor ei tööta', sort_order: 2, created_at: new Date() },
+      { id: 'pt-12', category_id: 'cat-2', code: 'T03', name: 'Internet ei tööta', sort_order: 3, created_at: new Date() },
+      { id: 'pt-13', category_id: 'cat-2', code: 'T04', name: 'Muu tehnika probleem', sort_order: 4, created_at: new Date() },
+      { id: 'pt-20', category_id: 'cat-3', code: 'O01', name: 'Tuleohu oht', sort_order: 1, created_at: new Date() },
+      { id: 'pt-21', category_id: 'cat-3', code: 'O02', name: 'Libedus', sort_order: 2, created_at: new Date() },
+      { id: 'pt-22', category_id: 'cat-3', code: 'O03', name: 'Terav ese', sort_order: 3, created_at: new Date() },
+      { id: 'pt-23', category_id: 'cat-3', code: 'O04', name: 'Muu ohutusprobleem', sort_order: 4, created_at: new Date() },
+      { id: 'pt-30', category_id: 'cat-4', code: 'I01', name: 'Tool katki', sort_order: 1, created_at: new Date() },
+      { id: 'pt-31', category_id: 'cat-4', code: 'I02', name: 'Laud katki', sort_order: 2, created_at: new Date() },
+      { id: 'pt-32', category_id: 'cat-4', code: 'I03', name: 'Kapp katki', sort_order: 3, created_at: new Date() },
+      { id: 'pt-33', category_id: 'cat-4', code: 'I04', name: 'Muu inventari probleem', sort_order: 4, created_at: new Date() },
     ];
-    await setDoc(problemTypesRef, { items: defaultProblemTypes, updated_at: serverTimestamp() });
+    const batch = writeBatch(db!);
+    defaultProblemTypes.forEach((pt) => {
+      batch.set(doc(problemTypesRef, pt.id), {
+        ...pt,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+      });
+    });
+    await batch.commit();
     initialized = true;
   }
 
@@ -528,13 +733,11 @@ export async function getAuditLogs(
 
 // ==================== PUSH TOKENS ====================
 
-export async function savePushToken(tokenData: Omit<PushToken, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
-  const tokensRef = collection(db!, 'pushTokens');
-  const q = query(
-  tokensRef,
-  where('user_id', '==', tokenData.user_id),
-  where('token', '==', tokenData.token)
-  );
+export async function savePushToken(
+  tokenData: Omit<PushToken, 'id' | 'created_at' | 'updated_at'>
+): Promise<void> {
+  const tokensRef = collection(db!, 'users', tokenData.user_id, 'pushTokens');
+  const q = query(tokensRef, where('token', '==', tokenData.token));
   const existing = await getDocs(q);
 
   if (existing.empty) {
@@ -550,8 +753,8 @@ export async function savePushToken(tokenData: Omit<PushToken, 'id' | 'created_a
   }
 }
 
-export async function deletePushToken(token: string): Promise<void> {
-  const tokensRef = collection(db!, 'pushTokens');
+export async function deletePushToken(userId: string, token: string): Promise<void> {
+  const tokensRef = collection(db!, 'users', userId, 'pushTokens');
   const q = query(tokensRef, where('token', '==', token));
   const snapshot = await getDocs(q);
 
@@ -564,7 +767,7 @@ export async function getPushTokenStats(): Promise<{
   total: number;
   byPlatform: Record<'android' | 'ios' | 'web', number>;
 }> {
-  const tokensRef = collection(db!, 'pushTokens');
+  const tokensRef = collectionGroup(db!, 'pushTokens');
   const [totalSnap, androidSnap, iosSnap, webSnap] = await Promise.all([
     getCountFromServer(tokensRef),
     getCountFromServer(query(tokensRef, where('platform', '==', 'android'))),

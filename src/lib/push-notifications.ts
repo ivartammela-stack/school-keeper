@@ -79,7 +79,7 @@ export async function unregisterPushNotifications(userId: string, token?: string
   try {
     // Clear token from Firestore
     if (token) {
-      await deletePushToken(token);
+      await deletePushToken(userId, token);
     }
 
     // Unregister from FCM/APNs

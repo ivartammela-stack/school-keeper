@@ -9,6 +9,8 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Settings as SettingsIcon, Mail, Bell, Flag, Link2, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '@/lib/firebase';
 import { logSettingChanged } from '@/lib/audit';
 import { logEvent, AnalyticsEvents } from '@/lib/analytics';
 import {
@@ -65,6 +67,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [ticketEmailEnabled, setTicketEmailEnabled] = useState(true);
   const [ticketEmailRoles, setTicketEmailRoles] = useState<AppRole[]>(['admin']);
+  const [sendingTestPush, setSendingTestPush] = useState(false);
 
   useEffect(() => {
     if (schoolId) {
@@ -79,9 +82,13 @@ export default function Settings() {
       if (!schoolId) return;
       const data = await getSystemSettings(schoolId);
       const sorted = [...data].sort((a, b) => {
-        const categoryCompare = a.category.localeCompare(b.category);
+        const aCategory = a.category || '';
+        const bCategory = b.category || '';
+        const aKey = a.key || '';
+        const bKey = b.key || '';
+        const categoryCompare = aCategory.localeCompare(bCategory);
         if (categoryCompare !== 0) return categoryCompare;
-        return a.key.localeCompare(b.key);
+        return aKey.localeCompare(bKey);
       });
       setSettings(sorted as SystemSetting[]);
     } catch (error) {
@@ -89,6 +96,29 @@ export default function Settings() {
       toast.error('Viga sätete laadimisel');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const sendTestPush = async () => {
+    if (!functions) {
+      toast.error('Functions pole saadaval');
+      return;
+    }
+    setSendingTestPush(true);
+    try {
+      const fn = httpsCallable(functions, 'sendTestPush');
+      const res = await fn();
+      const data = res.data as { ok?: boolean; success?: number; failed?: number };
+      if (data?.ok) {
+        toast.success(`Testteavitus saadetud (${data.success || 0}/${(data.success || 0) + (data.failed || 0)})`);
+      } else {
+        toast.error('Testteavituse saatmine ebaõnnestus');
+      }
+    } catch (error: any) {
+      const message = error?.message || 'Testteavituse saatmine ebaõnnestus';
+      toast.error(message);
+    } finally {
+      setSendingTestPush(false);
     }
   };
 
@@ -389,6 +419,16 @@ export default function Settings() {
                   disabled={!isSupported}
                 >
                   Luba push
+                </Button>
+              </div>
+              <div className="flex items-center justify-between">
+                <Label className="text-base">Testi teavitust</Label>
+                <Button
+                  variant="outline"
+                  onClick={sendTestPush}
+                  disabled={!isSupported || sendingTestPush}
+                >
+                  {sendingTestPush ? 'Saadan...' : 'Saada test'}
                 </Button>
               </div>
               {token && (

@@ -196,9 +196,13 @@ export const usePushNotifications = () => {
 
     if (!webListenerReady.current) {
       onMessage(messaging, (payload) => {
-        toast(payload.notification?.title || 'Teavitus', {
-          description: payload.notification?.body,
-        });
+        const title = payload.notification?.title || 'Teavitus';
+        const body = payload.notification?.body || '';
+        if (Notification.permission === 'granted') {
+          new Notification(title, { body, icon: '/icons/icon-192.webp' });
+        } else {
+          toast(title, { description: body });
+        }
       });
       webListenerReady.current = true;
     }

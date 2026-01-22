@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { PlusCircle, ClipboardList, Wrench, ShieldAlert, BarChart3, Settings, User } from 'lucide-react';
+import { PlusCircle, ClipboardList, Wrench, ShieldAlert, BarChart3, Settings, User, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -9,7 +9,8 @@ const navItems = [
   { path: '/work', label: 'Tööd', icon: Wrench, roles: ['admin', 'worker', 'facility_manager'] },
   { path: '/safety', label: 'Ohutus', icon: ShieldAlert, roles: ['admin', 'safety_officer'] },
   { path: '/overview', label: 'Ülevaade', icon: BarChart3, roles: ['admin', 'director'] },
-  { path: '/admin', label: 'Haldus', icon: Settings, roles: ['admin'] },
+  { path: '/admin', label: 'Haldus', icon: Users, roles: ['admin'] },
+  { path: '/settings', label: 'Seaded', icon: Settings, roles: ['admin'] },
   { path: '/profile', label: 'Profiil', icon: User, roles: ['teacher', 'safety_officer', 'director', 'worker', 'facility_manager', 'admin'] },
 ];
 

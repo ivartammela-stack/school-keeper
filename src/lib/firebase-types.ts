@@ -15,14 +15,14 @@ export type TicketStatus =
   | 'verified'
   | 'closed';
 
+export type MembershipStatus = 'pending' | 'active';
+
 export interface User {
   id: string;
   email: string | null;
   full_name: string | null;
   avatar_url: string | null;
-  school_id: string | null;
-  role?: AppRole | null;
-  roles?: AppRole[] | null;
+  active_school_id: string | null;
   created_at: Date;
   updated_at?: Date;
 }
@@ -31,6 +31,19 @@ export interface School {
   id: string;
   name: string;
   code?: string | null;
+  created_at: Date;
+  updated_at?: Date | null;
+}
+
+export interface SchoolMember {
+  id: string;
+  user_id: string;
+  school_id: string;
+  roles: AppRole[];
+  status: MembershipStatus;
+  email?: string | null;
+  full_name?: string | null;
+  avatar_url?: string | null;
   created_at: Date;
   updated_at?: Date | null;
 }
@@ -78,7 +91,7 @@ export interface Category {
   description?: string | null;
   icon?: string | null;
   sort_order?: number | null;
-  created_at: Date;
+  created_at?: Date;
 }
 
 export interface ProblemType {
@@ -88,7 +101,7 @@ export interface ProblemType {
   name: string;
   description?: string | null;
   sort_order?: number | null;
-  created_at: Date;
+  created_at?: Date;
 }
 
 export interface AuditLog {

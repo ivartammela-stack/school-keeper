@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -12,24 +11,23 @@ import { Users, Shield, School, Check, X, Plus, Pencil, Trash2, UserX } from 'lu
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  getAllUsers,
+  getSchoolMembers,
+  updateSchoolMember,
   getSchools,
-  updateUser,
   createSchool,
   updateSchool as updateSchoolRecord,
   deleteSchool as deleteSchoolRecord,
   getPushTokenStats,
 } from '@/lib/firestore';
 import { deleteUser as deleteFirebaseUser } from '@/lib/firebase-auth';
-import type { AppRole } from '@/lib/firebase-types';
+import type { AppRole, MembershipStatus } from '@/lib/firebase-types';
 
 interface UserProfile {
   id: string;
   email: string | null;
   full_name: string | null;
-  school_id: string | null;
-  created_at: string;
   roles: AppRole[];
+  status: MembershipStatus;
 }
 
 interface SchoolData {
@@ -80,7 +78,7 @@ export default function Admin() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [schoolId]);
 
   const normalizeError = (error: unknown) => {
     if (error instanceof Error) return error.message;
@@ -88,6 +86,13 @@ export default function Admin() {
   };
 
   const fetchData = async () => {
+    if (!schoolId) {
+      setUsers([]);
+      setSchools([]);
+      setPushTokenStats(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setUsersError(null);
     setSchoolsError(null);
@@ -97,8 +102,8 @@ export default function Admin() {
     try {
       console.log('Admin: Fetching data...');
       const [profiles, schoolsData, tokenStats] = await Promise.all([
-        getAllUsers().catch(err => {
-          console.error('getAllUsers failed:', err);
+        getSchoolMembers(schoolId).catch(err => {
+          console.error('getSchoolMembers failed:', err);
           setUsersError(normalizeError(err));
           return [];
         }),
@@ -120,22 +125,13 @@ export default function Admin() {
         console.log('Admin: Got push token stats:', tokenStats);
       }
 
-      const usersWithRoles: UserProfile[] = profiles.map((profile) => {
-        const roles = profile.roles && profile.roles.length > 0
-          ? profile.roles
-          : profile.role
-            ? [profile.role]
-            : [];
-
-        return {
-          id: profile.id,
-          email: profile.email || null,
-          full_name: profile.full_name || null,
-          school_id: profile.school_id || null,
-          created_at: profile.created_at.toISOString(),
-          roles,
-        };
-      });
+      const usersWithRoles: UserProfile[] = profiles.map((profile) => ({
+        id: profile.user_id || profile.id,
+        email: profile.email || null,
+        full_name: profile.full_name || null,
+        roles: profile.roles || [],
+        status: profile.status,
+      }));
 
       setUsers(usersWithRoles);
 
@@ -158,30 +154,19 @@ export default function Admin() {
   };
 
   const toggleRole = async (user: UserProfile, role: AppRole) => {
+    if (!schoolId) return;
     const hasRole = user.roles.includes(role);
     const updatedRoles = hasRole
       ? user.roles.filter((r) => r !== role)
       : [...user.roles, role];
-    const primaryRole = updatedRoles.includes('admin')
-      ? 'admin'
-      : updatedRoles[0] || null;
+    const nextStatus: MembershipStatus = updatedRoles.length > 0 ? 'active' : 'pending';
 
     try {
-      await updateUser(user.id, { roles: updatedRoles, role: primaryRole });
+      await updateSchoolMember(schoolId, user.id, { roles: updatedRoles, status: nextStatus });
       toast.success(hasRole ? 'Roll eemaldatud' : 'Roll lisatud');
       fetchData();
     } catch (error) {
       toast.error('Viga rolli muutmisel');
-    }
-  };
-
-  const updateSchool = async (userId: string, schoolId: string | null) => {
-    try {
-      await updateUser(userId, { school_id: schoolId === 'none' ? null : schoolId });
-      toast.success('Kool määratud');
-      fetchData();
-    } catch (error) {
-      toast.error('Viga kooli määramisel');
     }
   };
 
@@ -240,10 +225,14 @@ export default function Admin() {
   };
 
   const deleteSchool = async (schoolId: string) => {
-    // Check if school has users
-    const usersInSchool = users.filter(u => u.school_id === schoolId);
-    if (usersInSchool.length > 0) {
-      toast.error(`Ei saa kustutada - ${usersInSchool.length} kasutajat on sellesse kooli määratud`);
+    try {
+      const members = await getSchoolMembers(schoolId);
+      if (members.length > 0) {
+        toast.error(`Ei saa kustutada - ${members.length} kasutajat on sellesse kooli määratud`);
+        return;
+      }
+    } catch (error) {
+      toast.error('Viga kooli kasutajate kontrollimisel');
       return;
     }
 
@@ -260,10 +249,11 @@ export default function Admin() {
   };
 
   const deleteUser = async (userId: string) => {
+    if (!schoolId) return;
     setDeletingUserId(userId);
     
     try {
-      await deleteFirebaseUser(userId);
+      await deleteFirebaseUser(userId, schoolId);
       toast.success('Kasutaja kustutatud');
       fetchData();
     } catch (error) {
@@ -282,10 +272,19 @@ export default function Admin() {
     );
   }
 
-  const pendingUsers = users.filter(u => u.roles.length === 0);
-  const activeUsers = users.filter(u => u.roles.length > 0);
+  if (!schoolId) {
+    return (
+      <Card className="p-4">
+        <div className="text-center text-muted-foreground">
+          Vali aktiivne kool Profiili lehelt.
+        </div>
+      </Card>
+    );
+  }
+
+  const pendingUsers = users.filter(u => u.status === 'pending');
+  const activeUsers = users.filter(u => u.status === 'active');
   const usersWithoutEmail = users.filter(u => !u.email);
-  const usersWithoutSchool = users.filter(u => !u.school_id);
   const usersWithMultipleRoles = users.filter(u => u.roles.length > 1);
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : '—';
 
@@ -362,10 +361,6 @@ export default function Admin() {
                 <div>
                   <div className="text-muted-foreground">Email puudu</div>
                   <div>{usersWithoutEmail.length}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Kool puudu</div>
-                  <div>{usersWithoutSchool.length}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Koolid</div>
@@ -565,26 +560,6 @@ export default function Admin() {
                     ))}
                   </div>
 
-                  {/* School Assignment */}
-                  <div className="flex items-center gap-2">
-                    <School className="h-4 w-4 text-muted-foreground" />
-                    <Select
-                      value={user.school_id || 'none'}
-                      onValueChange={(value) => updateSchool(user.id, value)}
-                    >
-                      <SelectTrigger className="w-48 h-8">
-                        <SelectValue placeholder="Vali kool" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Pole määratud</SelectItem>
-                        {schools.map(school => (
-                          <SelectItem key={school.id} value={school.id}>
-                            {school.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
               </div>
             ))}
@@ -649,14 +624,14 @@ export default function Admin() {
         ) : (
           <div className="space-y-2">
             {schools.map(school => {
-              const userCount = users.filter(u => u.school_id === school.id).length;
+              const userCount = school.id === schoolId ? users.length : null;
               return (
                 <div key={school.id} className="flex items-center justify-between border rounded p-3">
                   <div>
                     <p className="font-medium">{school.name}</p>
                     <div className="flex gap-2 text-sm text-muted-foreground">
                       {school.code && <span>Kood: {school.code}</span>}
-                      <span>• {userCount} kasutajat</span>
+                      {userCount !== null && <span>• {userCount} kasutajat</span>}
                     </div>
                   </div>
                   <div className="flex gap-1">

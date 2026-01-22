@@ -1,118 +1,114 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     function signedIn() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return signedIn() && (
-        request.auth.token.role == 'admin' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          && (
-            userDoc(request.auth.uid).data.role == 'admin' ||
-            (userDoc(request.auth.uid).data.roles is list
-              && userDoc(request.auth.uid).data.roles.hasAny(['admin']))
-          ))
-      );
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
     }
 
     function userDoc(uid) {
       return get(/databases/$(database)/documents/users/$(uid));
     }
 
-    function mySchoolId() {
-      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        ? userDoc(request.auth.uid).data.school_id
-        : null;
+    function memberDoc(schoolId, uid) {
+      return get(/databases/$(database)/documents/schools/$(schoolId)/members/$(uid));
     }
 
-    function sameSchool(schoolId) {
-      return isAdmin() || (signedIn() && mySchoolId() == schoolId);
+    function isAnyMember(schoolId) {
+      return signedIn() && exists(memberDoc(schoolId, request.auth.uid));
     }
 
-    // USERS
+    function isMember(schoolId) {
+      return signedIn()
+        && exists(memberDoc(schoolId, request.auth.uid))
+        && memberDoc(schoolId, request.auth.uid).data.status == 'active';
+    }
+
+    function isSchoolAdmin(schoolId) {
+      return isMember(schoolId)
+        && (memberDoc(schoolId, request.auth.uid).data.roles is list)
+        && memberDoc(schoolId, request.auth.uid).data.roles.hasAny(['admin']);
+    }
+
+    // USERS (self only)
     match /users/{uid} {
-      // Allow admins to read all users, or user can read own doc
-      // Note: For collection queries, admin check uses Firestore doc role
-      allow read: if signedIn() && (
-        request.auth.uid == uid ||
-        isAdmin()
-      );
-
-      // User can create own profile, but not role/school_id.
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role == null
-        && request.resource.data.school_id == null
-        && request.resource.data.keys().hasOnly([
-          'email',
-          'full_name',
-          'avatar_url',
-          'school_id',
-          'role',
-          'created_at',
-          'updated_at'
-        ]);
-
-      // Admin can update any user's fields including role and school_id
-      allow update: if isAdmin();
-
-      // User can update own profile fields only (not role/school_id).
-      allow update: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role == resource.data.role
-        && request.resource.data.school_id == resource.data.school_id
-        && request.resource.data.keys().hasOnly([
-          'email',
-          'full_name',
-          'avatar_url',
-          'school_id',
-          'role',
-          'created_at',
-          'updated_at'
-        ]);
-
-      allow delete: if isAdmin();
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid);
+      allow delete: if isSelf(uid);
 
       match /pushTokens/{tokenId} {
-        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
-        allow write: if signedIn() && request.auth.uid == uid;
+        allow read, write: if isSelf(uid);
       }
     }
 
-    // TOP-LEVEL PUSH TOKENS (legacy shape used by app)
-    match /pushTokens/{tokenId} {
-      allow read: if isAdmin() || (signedIn() && resource.data.user_id == request.auth.uid);
-      allow create: if signedIn() && request.resource.data.user_id == request.auth.uid;
-      allow update, delete: if isAdmin() || (signedIn() && resource.data.user_id == request.auth.uid);
+    // GLOBAL CATALOGS (read for signed-in, write allowed for signed-in)
+    match /catalogs/global/{collection}/{docId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
     }
 
-    // SCHOOLS scoped data
+    // SCHOOLS
     match /schools/{schoolId} {
-      allow read: if sameSchool(schoolId);
-      allow write: if isAdmin();
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isSchoolAdmin(schoolId);
+
+      match /members/{uid} {
+        allow read: if isMember(schoolId) || isSelf(uid) || isSchoolAdmin(schoolId);
+        allow create: if (isSelf(uid)
+            && request.resource.data.status == 'pending'
+            && (request.resource.data.roles is list)
+            && request.resource.data.roles.size() == 0)
+          || isSchoolAdmin(schoolId);
+        allow update: if isSchoolAdmin(schoolId)
+          || (isSelf(uid)
+            && request.resource.data.roles == resource.data.roles
+            && request.resource.data.status == resource.data.status);
+        allow delete: if isSchoolAdmin(schoolId);
+      }
 
       match /tickets/{ticketId} {
-        allow read: if sameSchool(schoolId);
-        allow create: if sameSchool(schoolId);
-        allow update: if sameSchool(schoolId);
-        allow delete: if isAdmin();
+        allow read, create, update: if isMember(schoolId);
+        allow delete: if isSchoolAdmin(schoolId);
 
         match /comments/{commentId} {
-          allow read: if sameSchool(schoolId);
-          allow create: if sameSchool(schoolId);
-          allow update: if sameSchool(schoolId);
-          allow delete: if isAdmin();
+          allow read, create, update: if isMember(schoolId);
+          allow delete: if isSchoolAdmin(schoolId);
         }
       }
 
-      // lookups/settings/templates/auditLogs/stats jms
-      match /{docPath=**} {
-        allow read: if sameSchool(schoolId);
-        allow write: if isAdmin();
+      match /catalogs/{docId}/{subCollection=**} {
+        allow read: if isMember(schoolId);
+        allow write: if isSchoolAdmin(schoolId);
       }
+
+      match /settings/{docId} {
+        allow read: if isMember(schoolId);
+        allow write: if isSchoolAdmin(schoolId);
+      }
+
+      match /templates/{docId} {
+        allow read: if isMember(schoolId);
+        allow write: if isSchoolAdmin(schoolId);
+      }
+
+      match /auditLogs/{docId} {
+        allow read: if isSchoolAdmin(schoolId);
+        allow write: if isSchoolAdmin(schoolId);
+      }
+
+      match /{docPath=**} {
+        allow read: if isMember(schoolId);
+        allow write: if isSchoolAdmin(schoolId);
+      }
+    }
+
+    match /mail/{docId} {
+      allow read, write: if false;
     }
   }
 }

@@ -11,7 +11,7 @@ import {
 } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { auth, functions } from './firebase';
-import { getUser, createUser, updateUser } from './firestore';
+import { getUser, createUser, updateUser, getUserMemberships, updateSchoolMember } from './firestore';
 import type { AppRole, CustomClaims, User } from './firebase-types';
 
 if (!auth) {
@@ -52,7 +52,7 @@ export async function signUpWithEmail(
     email,
     full_name: fullName || null,
     avatar_url: null,
-    school_id: null,
+    active_school_id: null,
     created_at: new Date(),
   });
 
@@ -71,7 +71,7 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
       email: result.user.email,
       full_name: result.user.displayName,
       avatar_url: result.user.photoURL,
-      school_id: null,
+      active_school_id: null,
       created_at: new Date(),
     });
   }
@@ -107,6 +107,21 @@ export async function updateUserProfile(
       photoURL: data.avatar_url,
     });
   }
+
+  try {
+    const memberships = await getUserMemberships(userId);
+    await Promise.all(
+      memberships.map((m) =>
+        updateSchoolMember(m.school_id, userId, {
+          full_name: data.full_name ?? null,
+          avatar_url: data.avatar_url ?? null,
+          email: currentUser?.email || null,
+        })
+      )
+    );
+  } catch (error) {
+    console.warn('Failed to sync membership profile', error);
+  }
 }
 
 // ==================== CUSTOM CLAIMS / ROLES ====================
@@ -134,17 +149,12 @@ export async function hasAnyRole(roles: AppRole[]): Promise<boolean> {
   return userRole ? roles.includes(userRole) : false;
 }
 
-// Cloud Function to set user role (requires admin)
-export async function setUserRole(userId: string, role: AppRole | null): Promise<void> {
-  await updateUser(userId, { role: role || null });
-}
-
 // Cloud Function to delete user (requires admin)
-export async function deleteUser(userId: string): Promise<void> {
+export async function deleteUser(userId: string, schoolId: string): Promise<void> {
   if (!functions) throw new Error('Firebase Functions not initialized');
 
   const deleteUserFn = httpsCallable(functions, 'deleteUserV1');
-  await deleteUserFn({ userId });
+  await deleteUserFn({ userId, schoolId });
 }
 
 // ==================== TOKEN REFRESH ====================
