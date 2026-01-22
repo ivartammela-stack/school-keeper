@@ -2,7 +2,7 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAnalytics, Analytics } from 'firebase/analytics';
 import { getRemoteConfig, fetchAndActivate, RemoteConfig } from 'firebase/remote-config';
 import { getFirestore, Firestore } from 'firebase/firestore';
-import { getAuth, Auth } from 'firebase/auth';
+import { getAuth, Auth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 import { getFunctions, Functions } from 'firebase/functions';
 import { Capacitor } from '@capacitor/core';
@@ -39,6 +39,9 @@ if (isFirebaseConfigured) {
     // Initialize core services
     db = getFirestore(app);
     auth = getAuth(app);
+    setPersistence(auth, browserLocalPersistence).catch((error) => {
+      console.warn('Failed to set auth persistence:', error);
+    });
     storage = getStorage(app);
     functions = getFunctions(app, 'europe-west1');
 

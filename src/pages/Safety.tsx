@@ -26,6 +26,7 @@ type Ticket = {
   status: string;
   created_at: string;
   resolved_at: string | null;
+  auto_delete_at?: string | null;
   created_by: string | null;
   assigned_to: string | null;
   resolved_by: string | null;
@@ -105,6 +106,7 @@ export default function Safety() {
           status: t.status,
           created_at: t.created_at.toISOString(),
           resolved_at: t.resolved_at?.toISOString() || null,
+          auto_delete_at: t.auto_delete_at?.toISOString() || null,
           created_by: t.created_by || null,
           assigned_to: t.assigned_to || null,
           resolved_by: t.resolved_by || null,
@@ -197,12 +199,19 @@ export default function Safety() {
                     {(ticket.profiles?.full_name ||
                       ticket.assigned?.full_name ||
                       ticket.resolved?.full_name ||
-                      ticket.closed?.full_name) && (
+                      ticket.closed?.full_name ||
+                      ticket.auto_delete_at) && (
                       <div className="text-xs text-muted-foreground mt-2 space-y-1">
                         {ticket.profiles?.full_name && <p>Looja: {ticket.profiles.full_name}</p>}
                         {ticket.assigned?.full_name && <p>Töös: {ticket.assigned.full_name}</p>}
                         {ticket.resolved?.full_name && <p>Lahendas: {ticket.resolved.full_name}</p>}
                         {ticket.closed?.full_name && <p>Sulges: {ticket.closed.full_name}</p>}
+                        {ticket.status === 'closed' && ticket.auto_delete_at && (
+                          <p>
+                            Kustub automaatselt:{' '}
+                            {format(new Date(ticket.auto_delete_at), 'd. MMM yyyy HH:mm', { locale: et })}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>

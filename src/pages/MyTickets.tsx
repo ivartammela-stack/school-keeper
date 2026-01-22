@@ -25,6 +25,7 @@ type Ticket = {
   is_safety_related: boolean;
   description: string | null;
   images: string[] | null;
+  auto_delete_at?: string | null;
   categories: { name: string } | null;
   problem_types: { name: string } | null;
   profiles?: { full_name: string | null } | null;
@@ -103,6 +104,7 @@ export default function MyTickets() {
           is_safety_related: t.is_safety_related || false,
           description: t.description || null,
           images: t.images || null,
+          auto_delete_at: t.auto_delete_at?.toISOString() || null,
           categories: category ? { name: category.name } : null,
           problem_types: problemType ? { name: problemType.name } : null,
           profiles: creator ? { full_name: creator.full_name } : null,
@@ -277,6 +279,18 @@ export default function MyTickets() {
                   <p className="text-sm text-muted-foreground">Sulges</p>
                   <p>{selectedTicket.closed?.full_name || '-'}</p>
                 </div>
+                {selectedTicket.status === 'closed' && selectedTicket.auto_delete_at && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Kustub automaatselt</p>
+                    <p>
+                      {format(
+                        new Date(selectedTicket.auto_delete_at),
+                        'd. MMMM yyyy HH:mm',
+                        { locale: et }
+                      )}
+                    </p>
+                  </div>
+                )}
 
                 {/* Images */}
                 {selectedTicket.images && selectedTicket.images.length > 0 && (

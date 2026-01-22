@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
   PushNotifications,
@@ -6,9 +6,11 @@ import {
   PushNotificationSchema,
   ActionPerformed,
 } from '@capacitor/push-notifications';
+import { getMessaging, getToken, isSupported as isMessagingSupported, onMessage } from 'firebase/messaging';
 import { toast } from 'sonner';
 import { savePushToken } from '@/lib/firestore';
 import { onAuthChange } from '@/lib/firebase-auth';
+import { app } from '@/lib/firebase';
 
 const registerTokenWithBackend = async (
   token: string,
@@ -38,6 +40,7 @@ export const usePushNotifications = () => {
   const [token, setToken] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const webListenerReady = useRef(false);
 
   // Listen to auth state changes
   useEffect(() => {
@@ -55,11 +58,25 @@ export const usePushNotifications = () => {
   }, [token, userId]);
 
   useEffect(() => {
-    const isPushSupported = Capacitor.isNativePlatform();
-    setIsSupported(isPushSupported);
+    const isNative = Capacitor.isNativePlatform();
+    setIsSupported(isNative);
 
-    if (!isPushSupported) {
-      console.log('Push notifications not supported on web');
+    if (!isNative) {
+      const setupWebPush = async () => {
+        if (!app) return;
+        const supported = await isMessagingSupported();
+        if (!supported || !('serviceWorker' in navigator)) {
+          console.log('Push notifications not supported on web');
+          return;
+        }
+        setIsSupported(true);
+
+        if (Notification.permission === 'granted') {
+          await registerWebPush(false);
+        }
+      };
+
+      void setupWebPush();
       return;
     }
 
@@ -143,10 +160,70 @@ export const usePushNotifications = () => {
     };
   }, [userId]);
 
+  const registerWebPush = async (forcePrompt: boolean) => {
+    if (!app) return false;
+    const supported = await isMessagingSupported();
+    if (!supported || !('serviceWorker' in navigator)) return false;
+
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || '';
+    if (!vapidKey) {
+      toast.error('VAPID võti puudub');
+      return false;
+    }
+
+    if (Notification.permission !== 'granted') {
+      if (!forcePrompt) return false;
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast.error('Push teavitused keelatud');
+        return false;
+      }
+    }
+
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+    const messaging = getMessaging(app);
+    const webToken = await getToken(messaging, {
+      vapidKey,
+      serviceWorkerRegistration: registration,
+    });
+
+    if (webToken) {
+      setToken(webToken);
+      if (userId) {
+        await registerTokenWithBackend(webToken, 'web', userId);
+      }
+    }
+
+    if (!webListenerReady.current) {
+      onMessage(messaging, (payload) => {
+        toast(payload.notification?.title || 'Teavitus', {
+          description: payload.notification?.body,
+        });
+      });
+      webListenerReady.current = true;
+    }
+
+    return true;
+  };
+
   const requestPermission = async () => {
     if (!isSupported) {
-      toast.error('Push teavitused pole toetatud veebibrauseris');
+      toast.error('Push teavitused pole toetatud');
       return false;
+    }
+
+    if (!Capacitor.isNativePlatform()) {
+      try {
+        const ok = await registerWebPush(true);
+        if (ok) {
+          toast.success('Push teavitused lubatud!');
+        }
+        return ok;
+      } catch (error) {
+        console.error('Error requesting web push permission:', error);
+        toast.error('Viga teavituste lubamisel');
+        return false;
+      }
     }
 
     try {

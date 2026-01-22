@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { ChevronLeft, ChevronRight, Camera, MapPin, AlertTriangle, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -43,7 +44,6 @@ type DuplicateTicket = {
 };
 
 const STEPS = ['Valdkond', 'Probleem', 'Asukoht', 'Esita'];
-
 export default function SubmitTicket() {
   const navigate = useNavigate();
   const { user, schoolId } = useAuth();
@@ -60,6 +60,8 @@ export default function SubmitTicket() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
+  const [sendEmail, setSendEmail] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState('');
 
   // Cleanup blob URLs when component unmounts or URLs change
   useEffect(() => {
@@ -213,9 +215,15 @@ export default function SubmitTicket() {
   const handleSubmit = async (addToDuplicate?: string) => {
     if (!user || !schoolId || !selectedCategory || !selectedProblem || !location.trim()) return;
 
+    if (sendEmail && !notifyEmail.trim()) {
+      toast.error('Palun sisesta email');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const isSafetyRelated = selectedCategory.name === 'Ohutus ja töökeskkond';
+      const notifyEmailValue = sendEmail ? notifyEmail.trim() : null;
 
       const ticketId = await createTicket(schoolId, {
         category_id: selectedCategory.id,
@@ -223,6 +231,7 @@ export default function SubmitTicket() {
         location: location.trim(),
         location_key: location.trim().toLowerCase(),
         description: description.trim() || null,
+        notify_email: notifyEmailValue || null,
         created_by: user.uid,
         is_safety_related: isSafetyRelated,
         status: 'submitted',
@@ -466,6 +475,9 @@ export default function SubmitTicket() {
               <p><span className="text-muted-foreground">Probleem:</span> {selectedProblem?.name}</p>
               <p><span className="text-muted-foreground">Asukoht:</span> {location}</p>
               {description && <p><span className="text-muted-foreground">Lisainfo:</span> {description}</p>}
+              {sendEmail && notifyEmail.trim() && (
+                <p><span className="text-muted-foreground">E-post:</span> {notifyEmail.trim()}</p>
+              )}
               {imagePreviewUrls.length > 0 && (
                 <div>
                   <span className="text-muted-foreground">Pildid:</span>
@@ -484,6 +496,42 @@ export default function SubmitTicket() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Teavitused</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium">Saada e-postiga</p>
+                  <p className="text-xs text-muted-foreground">
+                    Saadetakse ainult registreeritud kasutajale.
+                  </p>
+                </div>
+                <Switch
+                  checked={sendEmail}
+                  onCheckedChange={(checked) => {
+                    setSendEmail(checked);
+                    if (!checked) {
+                      setNotifyEmail('');
+                    }
+                  }}
+                />
+              </div>
+
+              {sendEmail && (
+                <div className="space-y-2">
+                  <Input
+                    type="email"
+                    placeholder="kasutaja@kool.ee"
+                    value={notifyEmail}
+                    onChange={(e) => setNotifyEmail(e.target.value)}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {showDuplicateWarning && duplicates.length > 0 && (
             <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
               <CardContent className="p-4 space-y-3">
@@ -495,7 +543,12 @@ export default function SubmitTicket() {
                   {duplicates.map((d) => (
                     <div key={d.id} className="flex items-center justify-between bg-background rounded p-2">
                       <span>#{d.ticket_number} - {d.location}</span>
-                      <Button size="sm" variant="outline" onClick={() => handleSubmit(d.id)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSubmit(d.id)}
+                        disabled={submitting}
+                      >
                         Lisa sellele
                       </Button>
                     </div>

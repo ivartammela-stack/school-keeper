@@ -48,6 +48,7 @@ export interface Ticket {
   resolved_at: string | null;
   verified_at: string | null;
   closed_at: string | null;
+  auto_delete_at: string | null;
   categories?: { name: string };
   problem_types?: { name: string };
   profiles?: { full_name: string | null };
@@ -90,6 +91,7 @@ function mapTicket(
     resolved_at: ticket.resolved_at?.toISOString() || null,
     verified_at: ticket.verified_at?.toISOString() || null,
     closed_at: ticket.closed_at?.toISOString() || null,
+    auto_delete_at: ticket.auto_delete_at?.toISOString() || null,
     categories: category ? { name: category.name } : undefined,
     problem_types: problemType ? { name: problemType.name } : undefined,
     profiles: creator ? { full_name: creator.full_name } : undefined,

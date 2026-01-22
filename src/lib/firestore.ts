@@ -3,7 +3,9 @@ import {
   doc,
   getDoc,
   getDocs,
+  getCountFromServer,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -22,6 +24,7 @@ import {
 import { db } from './firebase';
 import type {
   User,
+  AppRole,
   School,
   Ticket,
   TicketComment,
@@ -49,6 +52,8 @@ const toTimestamp = (date: Date | null | undefined): Timestamp | null => {
   return Timestamp.fromDate(date);
 };
 
+const AUTO_DELETE_DAYS = 5;
+
 // ==================== USERS ====================
 
 export async function getUser(userId: string): Promise<User | null> {
@@ -66,19 +71,16 @@ export async function getUser(userId: string): Promise<User | null> {
 
 export async function createUser(userId: string, userData: Partial<User>): Promise<void> {
   const docRef = doc(db!, 'users', userId);
-  await updateDoc(docRef, {
-    ...userData,
-    created_at: serverTimestamp(),
-    updated_at: serverTimestamp(),
-  }).catch(() => {
-    // Doc doesn't exist, create it
-    const { id, ...dataWithoutId } = userData as User;
-    return addDoc(collection(db!, 'users'), {
+  const { id, ...dataWithoutId } = userData as User;
+  await setDoc(
+    docRef,
+    {
       ...dataWithoutId,
       created_at: serverTimestamp(),
       updated_at: serverTimestamp(),
-    });
-  });
+    },
+    { merge: true }
+  );
 }
 
 export async function updateUser(userId: string, userData: Partial<User>): Promise<void> {
@@ -100,14 +102,21 @@ export async function getUsersBySchool(schoolId: string): Promise<User[]> {
 }
 
 export async function getAllUsers(): Promise<User[]> {
-  const q = query(collection(db!, 'users'), orderBy('created_at', 'desc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({
+  const snapshot = await getDocs(collection(db!, 'users'));
+  const users = snapshot.docs.map((d) => ({
     id: d.id,
     ...d.data(),
     created_at: toDate(d.data().created_at) || new Date(),
     updated_at: toDate(d.data().updated_at),
   })) as User[];
+
+  users.sort((a, b) => {
+    const aTime = (a.created_at || a.updated_at || new Date(0)).getTime();
+    const bTime = (b.created_at || b.updated_at || new Date(0)).getTime();
+    return bTime - aTime;
+  });
+
+  return users;
 }
 
 // ==================== SCHOOLS ====================
@@ -194,16 +203,17 @@ export async function getTickets(
 
   return snapshot.docs.map((d) => {
     const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      created_at: toDate(data.created_at) || new Date(),
-      updated_at: toDate(data.updated_at) || new Date(),
-      resolved_at: toDate(data.resolved_at),
-      verified_at: toDate(data.verified_at),
-      closed_at: toDate(data.closed_at),
-    } as Ticket;
-  });
+      return {
+        id: d.id,
+        ...data,
+        created_at: toDate(data.created_at) || new Date(),
+        updated_at: toDate(data.updated_at) || new Date(),
+        resolved_at: toDate(data.resolved_at),
+        verified_at: toDate(data.verified_at),
+        closed_at: toDate(data.closed_at),
+        auto_delete_at: toDate(data.auto_delete_at),
+      } as Ticket;
+    });
 }
 
 export async function getTicket(schoolId: string, ticketId: string): Promise<Ticket | null> {
@@ -216,6 +226,7 @@ export async function getTicket(schoolId: string, ticketId: string): Promise<Tic
     ...data,
     created_at: toDate(data.created_at) || new Date(),
     updated_at: toDate(data.updated_at) || new Date(),
+    auto_delete_at: toDate(data.auto_delete_at),
   } as Ticket;
 }
 
@@ -286,6 +297,11 @@ export async function updateTicketStatus(
   } else if (status === 'closed') {
     updates.closed_at = serverTimestamp();
     updates.closed_by = userId;
+    updates.auto_delete_at = Timestamp.fromDate(
+      new Date(Date.now() + AUTO_DELETE_DAYS * 24 * 60 * 60 * 1000)
+    );
+  } else {
+    updates.auto_delete_at = null;
   }
 
   await updateDoc(docRef, updates);
@@ -310,16 +326,17 @@ export async function getDuplicateTickets(
 
   return snapshot.docs.map((d) => {
     const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      created_at: toDate(data.created_at) || new Date(),
-      updated_at: toDate(data.updated_at) || new Date(),
-      resolved_at: toDate(data.resolved_at),
-      verified_at: toDate(data.verified_at),
-      closed_at: toDate(data.closed_at),
-    } as Ticket;
-  });
+      return {
+        id: d.id,
+        ...data,
+        created_at: toDate(data.created_at) || new Date(),
+        updated_at: toDate(data.updated_at) || new Date(),
+        resolved_at: toDate(data.resolved_at),
+        verified_at: toDate(data.verified_at),
+        closed_at: toDate(data.closed_at),
+        auto_delete_at: toDate(data.auto_delete_at),
+      } as Ticket;
+    });
 }
 
 // Real-time ticket listener
@@ -345,6 +362,7 @@ export function subscribeToTickets(
         ...data,
         created_at: toDate(data.created_at) || new Date(),
         updated_at: toDate(data.updated_at) || new Date(),
+        auto_delete_at: toDate(data.auto_delete_at),
       } as Ticket;
     });
     callback(tickets);
@@ -413,6 +431,65 @@ export async function updateProblemTypes(
   await updateDoc(docRef, { items: problemTypes, updated_at: serverTimestamp() });
 }
 
+// Initialize default categories and problem types for a school if they don't exist
+export async function initializeSchoolLookups(schoolId: string): Promise<boolean> {
+  const categoriesRef = doc(db!, 'schools', schoolId, 'lookups', 'categories');
+  const problemTypesRef = doc(db!, 'schools', schoolId, 'lookups', 'problemTypes');
+
+  const [categoriesSnap, problemTypesSnap] = await Promise.all([
+    getDoc(categoriesRef),
+    getDoc(problemTypesRef),
+  ]);
+
+  let initialized = false;
+
+  // Default categories
+  if (!categoriesSnap.exists() || !categoriesSnap.data()?.items?.length) {
+    const defaultCategories: Category[] = [
+      { id: 'cat-1', name: 'Hoone ja territoorium', description: 'Hoone ja territooriumi probleemid', icon: 'building', sort_order: 1 },
+      { id: 'cat-2', name: 'Tehnika ja seadmed', description: 'Tehnika ja seadmete probleemid', icon: 'wrench', sort_order: 2 },
+      { id: 'cat-3', name: 'Ohutus ja töökeskkond', description: 'Ohutuse ja töökeskkonna probleemid', icon: 'shield-alert', sort_order: 3 },
+      { id: 'cat-4', name: 'Inventar ja mööbel', description: 'Inventari ja mööbli probleemid', icon: 'package', sort_order: 4 },
+    ];
+    await setDoc(categoriesRef, { items: defaultCategories, updated_at: serverTimestamp() });
+    initialized = true;
+  }
+
+  // Default problem types
+  if (!problemTypesSnap.exists() || !problemTypesSnap.data()?.items?.length) {
+    const defaultProblemTypes: ProblemType[] = [
+      // Hoone ja territoorium
+      { id: 'pt-1', category_id: 'cat-1', code: 'H01', name: 'Katus lekib', sort_order: 1 },
+      { id: 'pt-2', category_id: 'cat-1', code: 'H02', name: 'Aken katki', sort_order: 2 },
+      { id: 'pt-3', category_id: 'cat-1', code: 'H03', name: 'Uks ei sulgu', sort_order: 3 },
+      { id: 'pt-4', category_id: 'cat-1', code: 'H04', name: 'Valgustus ei tööta', sort_order: 4 },
+      { id: 'pt-5', category_id: 'cat-1', code: 'H05', name: 'Kütte probleem', sort_order: 5 },
+      { id: 'pt-6', category_id: 'cat-1', code: 'H06', name: 'Vesi ei jookse', sort_order: 6 },
+      { id: 'pt-7', category_id: 'cat-1', code: 'H07', name: 'WC ummistunud', sort_order: 7 },
+      { id: 'pt-8', category_id: 'cat-1', code: 'H08', name: 'Muu hoone probleem', sort_order: 8 },
+      // Tehnika
+      { id: 'pt-10', category_id: 'cat-2', code: 'T01', name: 'Arvuti ei tööta', sort_order: 1 },
+      { id: 'pt-11', category_id: 'cat-2', code: 'T02', name: 'Projektor ei tööta', sort_order: 2 },
+      { id: 'pt-12', category_id: 'cat-2', code: 'T03', name: 'Internet ei tööta', sort_order: 3 },
+      { id: 'pt-13', category_id: 'cat-2', code: 'T04', name: 'Muu tehnika probleem', sort_order: 4 },
+      // Ohutus
+      { id: 'pt-20', category_id: 'cat-3', code: 'O01', name: 'Tuleohu oht', sort_order: 1 },
+      { id: 'pt-21', category_id: 'cat-3', code: 'O02', name: 'Libedus', sort_order: 2 },
+      { id: 'pt-22', category_id: 'cat-3', code: 'O03', name: 'Terav ese', sort_order: 3 },
+      { id: 'pt-23', category_id: 'cat-3', code: 'O04', name: 'Muu ohutusprobleem', sort_order: 4 },
+      // Inventar
+      { id: 'pt-30', category_id: 'cat-4', code: 'I01', name: 'Tool katki', sort_order: 1 },
+      { id: 'pt-31', category_id: 'cat-4', code: 'I02', name: 'Laud katki', sort_order: 2 },
+      { id: 'pt-32', category_id: 'cat-4', code: 'I03', name: 'Kapp katki', sort_order: 3 },
+      { id: 'pt-33', category_id: 'cat-4', code: 'I04', name: 'Muu inventari probleem', sort_order: 4 },
+    ];
+    await setDoc(problemTypesRef, { items: defaultProblemTypes, updated_at: serverTimestamp() });
+    initialized = true;
+  }
+
+  return initialized;
+}
+
 // ==================== AUDIT LOG ====================
 
 export async function addAuditLog(
@@ -454,9 +531,9 @@ export async function getAuditLogs(
 export async function savePushToken(tokenData: Omit<PushToken, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
   const tokensRef = collection(db!, 'pushTokens');
   const q = query(
-    tokensRef,
-    where('user_id', '==', tokenData.user_id),
-    where('token', '==', tokenData.token)
+  tokensRef,
+  where('user_id', '==', tokenData.user_id),
+  where('token', '==', tokenData.token)
   );
   const existing = await getDocs(q);
 
@@ -481,6 +558,28 @@ export async function deletePushToken(token: string): Promise<void> {
   const batch = writeBatch(db!);
   snapshot.docs.forEach((d) => batch.delete(d.ref));
   await batch.commit();
+}
+
+export async function getPushTokenStats(): Promise<{
+  total: number;
+  byPlatform: Record<'android' | 'ios' | 'web', number>;
+}> {
+  const tokensRef = collection(db!, 'pushTokens');
+  const [totalSnap, androidSnap, iosSnap, webSnap] = await Promise.all([
+    getCountFromServer(tokensRef),
+    getCountFromServer(query(tokensRef, where('platform', '==', 'android'))),
+    getCountFromServer(query(tokensRef, where('platform', '==', 'ios'))),
+    getCountFromServer(query(tokensRef, where('platform', '==', 'web'))),
+  ]);
+
+  return {
+    total: totalSnap.data().count,
+    byPlatform: {
+      android: androidSnap.data().count,
+      ios: iosSnap.data().count,
+      web: webSnap.data().count,
+    },
+  };
 }
 
 // ==================== SETTINGS ====================
@@ -559,6 +658,38 @@ export interface SystemSetting {
   value: unknown;
   description?: string | null;
   category: string;
+}
+
+export interface TicketEmailSetting {
+  enabled: boolean;
+  roles: AppRole[];
+}
+
+export async function getTicketEmailSetting(
+  schoolId: string
+): Promise<TicketEmailSetting | null> {
+  const docRef = doc(db!, 'schools', schoolId, 'settings', 'ticket_email');
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return null;
+  const value = docSnap.data()?.value;
+  if (!value || typeof value !== 'object') return null;
+  return {
+    enabled: Boolean(value.enabled),
+    roles: Array.isArray(value.roles) ? (value.roles as AppRole[]) : [],
+  };
+}
+
+export async function updateTicketEmailSetting(
+  schoolId: string,
+  value: TicketEmailSetting
+): Promise<void> {
+  const docRef = doc(db!, 'schools', schoolId, 'settings', 'ticket_email');
+  await setDoc(docRef, {
+    value,
+    category: 'notification',
+    description: 'Uue teate push-teavituse seaded',
+    updated_at: serverTimestamp(),
+  }, { merge: true });
 }
 
 export async function getSystemSettings(schoolId: string): Promise<SystemSetting[]> {

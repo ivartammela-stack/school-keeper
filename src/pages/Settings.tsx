@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Settings as SettingsIcon, Mail, Bell, Flag, Link2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { logSettingChanged } from '@/lib/audit';
@@ -17,12 +18,16 @@ import {
 } from '@/lib/remote-config';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/hooks/useAuth';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import {
   getSystemSettings,
   updateSystemSetting,
+  getTicketEmailSetting,
+  updateTicketEmailSetting,
   getEmailTemplates,
   updateEmailTemplate as updateEmailTemplateRecord,
 } from '@/lib/firestore';
+import { APP_ROLES, AppRole } from '@/lib/firebase-types';
 
 interface SystemSetting {
   id: string;
@@ -42,17 +47,30 @@ interface EmailTemplate {
   enabled: boolean;
 }
 
+const roleLabels: Record<string, string> = {
+  teacher: 'Õpetaja',
+  safety_officer: 'Töökeskkonnavolinik',
+  director: 'Direktor',
+  worker: 'Töömees',
+  facility_manager: 'Majandusjuhataja',
+  admin: 'Admin',
+};
+
 export default function Settings() {
   const { schoolId } = useAuth();
+  const { isSupported, requestPermission, token } = usePushNotifications();
   const [settings, setSettings] = useState<SystemSetting[]>([]);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null);
   const [loading, setLoading] = useState(true);
+  const [ticketEmailEnabled, setTicketEmailEnabled] = useState(true);
+  const [ticketEmailRoles, setTicketEmailRoles] = useState<AppRole[]>(['admin']);
 
   useEffect(() => {
     if (schoolId) {
       fetchSettings();
       fetchEmailTemplates();
+      fetchTicketEmailSetting();
     }
   }, [schoolId]);
 
@@ -82,6 +100,20 @@ export default function Settings() {
     } catch (error) {
       console.error('Error fetching email templates:', error);
       toast.error('Viga e-posti mallide laadimisel');
+    }
+  };
+
+  const fetchTicketEmailSetting = async () => {
+    try {
+      if (!schoolId) return;
+      const data = await getTicketEmailSetting(schoolId);
+      if (data) {
+        setTicketEmailEnabled(data.enabled);
+        setTicketEmailRoles(data.roles);
+      }
+    } catch (error) {
+      console.error('Error fetching ticket email setting:', error);
+      toast.error('Viga e-posti sätete laadimisel');
     }
   };
 
@@ -119,6 +151,20 @@ export default function Settings() {
     } catch (error) {
       console.error('Error updating email template:', error);
       toast.error('Viga e-posti malli uuendamisel');
+    }
+  };
+
+  const saveTicketEmailSetting = async () => {
+    if (!schoolId) return;
+    try {
+      await updateTicketEmailSetting(schoolId, {
+        enabled: ticketEmailEnabled,
+        roles: ticketEmailRoles,
+      });
+      toast.success('E-posti teavitused salvestatud');
+    } catch (error) {
+      console.error('Error updating ticket email setting:', error);
+      toast.error('Viga e-posti sätete salvestamisel');
     }
   };
 
@@ -313,6 +359,71 @@ export default function Settings() {
 
         {/* Notifications */}
         <TabsContent value="notifications" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Bell className="h-5 w-5" />
+                <CardTitle>Uue teate push-teavitused</CardTitle>
+              </div>
+              <CardDescription>
+                Saada uus teade push-teavitusena valitud rollidele
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Push tugi</span>
+                <span>{isSupported ? 'toetatud' : 'pole toetatud'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <Label className="text-base">Push-teavitused</Label>
+                <Switch
+                  checked={ticketEmailEnabled}
+                  onCheckedChange={(checked) => setTicketEmailEnabled(checked)}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label className="text-base">Luba teavitused seadmes</Label>
+                <Button
+                  variant="outline"
+                  onClick={() => requestPermission()}
+                  disabled={!isSupported}
+                >
+                  Luba push
+                </Button>
+              </div>
+              {token && (
+                <div className="text-xs text-muted-foreground">
+                  Push token salvestatud.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                {APP_ROLES.map((role) => {
+                  const checked = ticketEmailRoles.includes(role);
+                  return (
+                    <label key={role} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => {
+                          const isChecked = Boolean(value);
+                          setTicketEmailRoles((prev) =>
+                            isChecked ? [...prev, role] : prev.filter((r) => r !== role)
+                          );
+                        }}
+                        disabled={!ticketEmailEnabled}
+                      />
+                      {roleLabels[role] || role}
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={saveTicketEmailSetting}>
+                  <Save className="h-4 w-4 mr-2" />
+                  Salvesta
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">

@@ -136,17 +136,14 @@ export async function hasAnyRole(roles: AppRole[]): Promise<boolean> {
 
 // Cloud Function to set user role (requires admin)
 export async function setUserRole(userId: string, role: AppRole | null): Promise<void> {
-  if (!functions) throw new Error('Firebase Functions not initialized');
-
-  const setRoleFn = httpsCallable(functions, 'setUserRole');
-  await setRoleFn({ userId, role });
+  await updateUser(userId, { role: role || null });
 }
 
 // Cloud Function to delete user (requires admin)
 export async function deleteUser(userId: string): Promise<void> {
   if (!functions) throw new Error('Firebase Functions not initialized');
 
-  const deleteUserFn = httpsCallable(functions, 'deleteUser');
+  const deleteUserFn = httpsCallable(functions, 'deleteUserV1');
   await deleteUserFn({ userId });
 }
 

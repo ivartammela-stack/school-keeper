@@ -6,9 +6,8 @@ import {
   signUpWithEmail,
   signOut as firebaseSignOut,
   getUserClaims,
-  setUserRole,
 } from '@/lib/firebase-auth';
-import { getUser } from '@/lib/firestore';
+import { getUser, createUser, getSchools, getSchool, updateUser, initializeSchoolLookups } from '@/lib/firestore';
 import { logger } from '@/lib/logger';
 import { initializePushNotifications, unregisterPushNotifications } from '@/lib/push-notifications';
 import type { AppRole, User } from '@/lib/firebase-types';
@@ -67,23 +66,83 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             getUserClaims(),
           ]);
 
-          if (!userProfile?.role && !claims?.role && firebaseUser.email === 'tek@tek.ee') {
+          if (!userProfile) {
+            await createUser(firebaseUser.uid, {
+              id: firebaseUser.uid,
+              email: firebaseUser.email,
+              full_name: firebaseUser.displayName || null,
+              avatar_url: firebaseUser.photoURL || null,
+              school_id: null,
+              created_at: new Date(),
+            });
+            userProfile = await getUser(firebaseUser.uid);
+          }
+
+          // Sync role from claims into Firestore if needed
+          const profileRole = userProfile?.role || null;
+          const claimsRole = claims?.role || null;
+
+          if (!profileRole && claimsRole) {
             try {
-              await setUserRole(firebaseUser.uid, 'admin');
-              [userProfile, claims] = await Promise.all([
-                getUser(firebaseUser.uid),
-                getUserClaims(),
-              ]);
+              await updateUser(firebaseUser.uid, { role: claimsRole });
+              userProfile = await getUser(firebaseUser.uid);
             } catch (error) {
-              logger.warn('Failed to bootstrap admin role', error);
+              logger.warn('Failed to sync Firestore role from claims', error);
+            }
+          }
+
+          // Validate and fix school_id for admin users
+          let validSchoolId = userProfile?.school_id || claims?.school_id || null;
+
+          if (validSchoolId) {
+            // Check if the school actually exists
+            const school = await getSchool(validSchoolId);
+            if (!school) {
+              logger.warn('User school_id does not exist, will reassign', { school_id: validSchoolId });
+              validSchoolId = null;
+            }
+          }
+
+          // Auto-assign school when missing (single-school safe default)
+          const isAdmin = userProfile?.role === 'admin' || claims?.role === 'admin';
+          if (!validSchoolId) {
+            try {
+              const schools = await getSchools();
+              if (schools.length === 1) {
+                validSchoolId = schools[0].id;
+                await updateUser(firebaseUser.uid, { school_id: validSchoolId });
+                userProfile = await getUser(firebaseUser.uid);
+                logger.info('Auto-assigned school to user', { school_id: validSchoolId });
+              } else if (isAdmin && schools.length > 0) {
+                validSchoolId = schools[0].id;
+                await updateUser(firebaseUser.uid, { school_id: validSchoolId });
+                userProfile = await getUser(firebaseUser.uid);
+                logger.info('Auto-assigned school to admin', { school_id: validSchoolId });
+              }
+            } catch (error) {
+              logger.warn('Failed to auto-assign school', error);
             }
           }
 
           setProfile(userProfile);
-          setSchoolId(userProfile?.school_id || claims?.school_id || null);
+          setSchoolId(validSchoolId);
 
-          // Prefer role from profile (Firestore), fallback to custom claims
-          if (userProfile?.role) {
+          // Initialize lookups for admin users (creates default categories/problem types)
+          if (validSchoolId && isAdmin) {
+            try {
+              const initialized = await initializeSchoolLookups(validSchoolId);
+              if (initialized) {
+                logger.info('Initialized default lookups for school', { school_id: validSchoolId });
+              }
+            } catch (error) {
+              logger.warn('Failed to initialize lookups', error);
+            }
+          }
+
+          // Prefer roles from profile (Firestore), fallback to single role or claims
+          if (userProfile?.roles && userProfile.roles.length > 0) {
+            setRoles(userProfile.roles);
+          } else if (userProfile?.role) {
             setRoles([userProfile.role]);
           } else if (claims?.role) {
             setRoles([claims.role]);
@@ -94,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Initialize push notifications for logged in user
           initializePushNotifications(firebaseUser.uid);
         } catch (error) {
+          console.error('Error fetching user data', error);
           logger.error('Error fetching user data', error);
           setRoles([]);
           setProfile(null);

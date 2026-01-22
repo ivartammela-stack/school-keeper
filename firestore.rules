@@ -1,0 +1,118 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.role == 'admin' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && (
+            userDoc(request.auth.uid).data.role == 'admin' ||
+            (userDoc(request.auth.uid).data.roles is list
+              && userDoc(request.auth.uid).data.roles.hasAny(['admin']))
+          ))
+      );
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function mySchoolId() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? userDoc(request.auth.uid).data.school_id
+        : null;
+    }
+
+    function sameSchool(schoolId) {
+      return isAdmin() || (signedIn() && mySchoolId() == schoolId);
+    }
+
+    // USERS
+    match /users/{uid} {
+      // Allow admins to read all users, or user can read own doc
+      // Note: For collection queries, admin check uses Firestore doc role
+      allow read: if signedIn() && (
+        request.auth.uid == uid ||
+        isAdmin()
+      );
+
+      // User can create own profile, but not role/school_id.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.role == null
+        && request.resource.data.school_id == null
+        && request.resource.data.keys().hasOnly([
+          'email',
+          'full_name',
+          'avatar_url',
+          'school_id',
+          'role',
+          'created_at',
+          'updated_at'
+        ]);
+
+      // Admin can update any user's fields including role and school_id
+      allow update: if isAdmin();
+
+      // User can update own profile fields only (not role/school_id).
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.school_id == resource.data.school_id
+        && request.resource.data.keys().hasOnly([
+          'email',
+          'full_name',
+          'avatar_url',
+          'school_id',
+          'role',
+          'created_at',
+          'updated_at'
+        ]);
+
+      allow delete: if isAdmin();
+
+      match /pushTokens/{tokenId} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    // TOP-LEVEL PUSH TOKENS (legacy shape used by app)
+    match /pushTokens/{tokenId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.user_id == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if isAdmin() || (signedIn() && resource.data.user_id == request.auth.uid);
+    }
+
+    // SCHOOLS scoped data
+    match /schools/{schoolId} {
+      allow read: if sameSchool(schoolId);
+      allow write: if isAdmin();
+
+      match /tickets/{ticketId} {
+        allow read: if sameSchool(schoolId);
+        allow create: if sameSchool(schoolId);
+        allow update: if sameSchool(schoolId);
+        allow delete: if isAdmin();
+
+        match /comments/{commentId} {
+          allow read: if sameSchool(schoolId);
+          allow create: if sameSchool(schoolId);
+          allow update: if sameSchool(schoolId);
+          allow delete: if isAdmin();
+        }
+      }
+
+      // lookups/settings/templates/auditLogs/stats jms
+      match /{docPath=**} {
+        allow read: if sameSchool(schoolId);
+        allow write: if isAdmin();
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@ export interface User {
   avatar_url: string | null;
   school_id: string | null;
   role?: AppRole | null;
+  roles?: AppRole[] | null;
   created_at: Date;
   updated_at?: Date;
 }
@@ -42,6 +43,7 @@ export interface Ticket {
   location: string;
   location_key?: string | null;
   description?: string | null;
+  notify_email?: string | null;
   status: TicketStatus;
   priority?: number | null;
   assigned_to?: string | null;
@@ -55,6 +57,7 @@ export interface Ticket {
   verified_at?: Date | null;
   closed_at?: Date | null;
   closed_by?: string | null;
+  auto_delete_at?: Date | null;
   duplicate_of?: string | null;
   duplicate_reason?: string | null;
 }

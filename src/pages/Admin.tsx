@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Users, Shield, School, Check, X, Plus, Pencil, Trash2, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
@@ -17,8 +18,9 @@ import {
   createSchool,
   updateSchool as updateSchoolRecord,
   deleteSchool as deleteSchoolRecord,
+  getPushTokenStats,
 } from '@/lib/firestore';
-import { deleteUser as deleteFirebaseUser, setUserRole } from '@/lib/firebase-auth';
+import { deleteUser as deleteFirebaseUser } from '@/lib/firebase-auth';
 import type { AppRole } from '@/lib/firebase-types';
 
 interface UserProfile {
@@ -55,11 +57,20 @@ const roleColors: Record<AppRole, string> = {
 };
 
 export default function Admin() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, roles: currentRoles, schoolId, isDemo } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [schools, setSchools] = useState<SchoolData[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [schoolsError, setSchoolsError] = useState<string | null>(null);
+  const [pushTokensError, setPushTokensError] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const [lastFetchAt, setLastFetchAt] = useState<Date | null>(null);
+  const [pushTokenStats, setPushTokenStats] = useState<{
+    total: number;
+    byPlatform: Record<'android' | 'ios' | 'web', number>;
+  } | null>(null);
   
   // School form state
   const [schoolDialogOpen, setSchoolDialogOpen] = useState(false);
@@ -71,23 +82,60 @@ export default function Admin() {
     fetchData();
   }, []);
 
+  const normalizeError = (error: unknown) => {
+    if (error instanceof Error) return error.message;
+    return String(error);
+  };
+
   const fetchData = async () => {
     setLoading(true);
-    
+    setUsersError(null);
+    setSchoolsError(null);
+    setPushTokensError(null);
+    setLastError(null);
+
     try {
-      const [profiles, schoolsData] = await Promise.all([
-        getAllUsers(),
-        getSchools(),
+      console.log('Admin: Fetching data...');
+      const [profiles, schoolsData, tokenStats] = await Promise.all([
+        getAllUsers().catch(err => {
+          console.error('getAllUsers failed:', err);
+          setUsersError(normalizeError(err));
+          return [];
+        }),
+        getSchools().catch(err => {
+          console.error('getSchools failed:', err);
+          setSchoolsError(normalizeError(err));
+          return [];
+        }),
+        getPushTokenStats().catch(err => {
+          console.error('getPushTokenStats failed:', err);
+          setPushTokensError(normalizeError(err));
+          return null;
+        }),
       ]);
 
-      const usersWithRoles: UserProfile[] = profiles.map((profile) => ({
-        id: profile.id,
-        email: profile.email || null,
-        full_name: profile.full_name || null,
-        school_id: profile.school_id || null,
-        created_at: profile.created_at.toISOString(),
-        roles: profile.role ? [profile.role] : [],
-      }));
+      console.log('Admin: Got profiles:', profiles.length, profiles);
+      console.log('Admin: Got schools:', schoolsData.length, schoolsData);
+      if (tokenStats) {
+        console.log('Admin: Got push token stats:', tokenStats);
+      }
+
+      const usersWithRoles: UserProfile[] = profiles.map((profile) => {
+        const roles = profile.roles && profile.roles.length > 0
+          ? profile.roles
+          : profile.role
+            ? [profile.role]
+            : [];
+
+        return {
+          id: profile.id,
+          email: profile.email || null,
+          full_name: profile.full_name || null,
+          school_id: profile.school_id || null,
+          created_at: profile.created_at.toISOString(),
+          roles,
+        };
+      });
 
       setUsers(usersWithRoles);
 
@@ -98,17 +146,28 @@ export default function Admin() {
           code: school.code || null,
         }))
       );
+      setPushTokenStats(tokenStats);
     } catch (error) {
       toast.error('Viga andmete laadimisel');
-      console.error(error);
+      console.error('Admin fetchData error:', error);
+      setLastError(normalizeError(error));
     } finally {
+      setLastFetchAt(new Date());
       setLoading(false);
     }
   };
 
-  const toggleRole = async (userId: string, role: AppRole, hasRole: boolean) => {
+  const toggleRole = async (user: UserProfile, role: AppRole) => {
+    const hasRole = user.roles.includes(role);
+    const updatedRoles = hasRole
+      ? user.roles.filter((r) => r !== role)
+      : [...user.roles, role];
+    const primaryRole = updatedRoles.includes('admin')
+      ? 'admin'
+      : updatedRoles[0] || null;
+
     try {
-      await setUserRole(userId, hasRole ? null : role);
+      await updateUser(user.id, { roles: updatedRoles, role: primaryRole });
       toast.success(hasRole ? 'Roll eemaldatud' : 'Roll lisatud');
       fetchData();
     } catch (error) {
@@ -225,6 +284,22 @@ export default function Admin() {
 
   const pendingUsers = users.filter(u => u.roles.length === 0);
   const activeUsers = users.filter(u => u.roles.length > 0);
+  const usersWithoutEmail = users.filter(u => !u.email);
+  const usersWithoutSchool = users.filter(u => !u.school_id);
+  const usersWithMultipleRoles = users.filter(u => u.roles.length > 1);
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '—';
+
+  const roleCounts = ROLES.reduce<Record<AppRole, number>>((acc, role) => {
+    acc[role.value] = users.filter((u) => u.roles.includes(role.value)).length;
+    return acc;
+  }, {
+    teacher: 0,
+    safety_officer: 0,
+    director: 0,
+    worker: 0,
+    facility_manager: 0,
+    admin: 0,
+  });
 
   return (
     <div className="space-y-6">
@@ -232,6 +307,113 @@ export default function Admin() {
         <Shield className="h-6 w-6 text-orange-500" />
         <h1 className="text-2xl font-bold">Administreerimine</h1>
       </div>
+
+      <Card className="p-4">
+        <Accordion type="single" collapsible>
+          <AccordionItem value="diagnostics" className="border-none">
+            <AccordionTrigger className="py-0 hover:no-underline">
+              <span className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-muted-foreground" />
+                Diagnostika
+              </span>
+            </AccordionTrigger>
+            <AccordionContent>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Kasutaja ID</div>
+                  <div className="truncate">{currentUser?.uid || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Email</div>
+                  <div className="truncate">{currentUser?.email || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Rollid</div>
+                  <div>{currentRoles.length > 0 ? currentRoles.join(', ') : '—'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Kool</div>
+                  <div className="truncate">{schoolId || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Keskkond</div>
+                  <div className="truncate">{appOrigin}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Demo režiim</div>
+                  <div>{isDemo ? 'jah' : 'ei'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Kasutajaid kokku</div>
+                  <div>{users.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Aktiivseid</div>
+                  <div>{activeUsers.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Kinnitamata</div>
+                  <div>{pendingUsers.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Mitu rolli</div>
+                  <div>{usersWithMultipleRoles.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Email puudu</div>
+                  <div>{usersWithoutEmail.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Kool puudu</div>
+                  <div>{usersWithoutSchool.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Koolid</div>
+                  <div>{schools.length}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Viimane laadimine</div>
+                  <div>{lastFetchAt ? lastFetchAt.toLocaleString('et-EE') : '—'}</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Push tokenid</div>
+                  <div>
+                    {pushTokenStats
+                      ? `${pushTokenStats.total} (web ${pushTokenStats.byPlatform.web}, android ${pushTokenStats.byPlatform.android}, ios ${pushTokenStats.byPlatform.ios})`
+                      : '—'}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Rollide jaotus</div>
+                  <div className="flex flex-wrap gap-2">
+                    {ROLES.map((role) => (
+                      <span key={role.value} className="text-xs rounded-full bg-muted px-2 py-1">
+                        {role.label}: {roleCounts[role.value]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Push tokenite viga</div>
+                  <div className={pushTokensError ? 'text-destructive' : ''}>{pushTokensError || '—'}</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Kasutajate viga</div>
+                  <div className={usersError ? 'text-destructive' : ''}>{usersError || '—'}</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Koolide viga</div>
+                  <div className={schoolsError ? 'text-destructive' : ''}>{schoolsError || '—'}</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground">Üldviga</div>
+                  <div className={lastError ? 'text-destructive' : ''}>{lastError || '—'}</div>
+                </div>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </Card>
 
       {/* Pending Users */}
       {pendingUsers.length > 0 && (
@@ -286,7 +468,7 @@ export default function Admin() {
                         key={role.value}
                         size="sm"
                         variant="outline"
-                        onClick={() => toggleRole(user.id, role.value, false)}
+                        onClick={() => toggleRole(user, role.value)}
                         className="text-xs"
                       >
                         <Check className="h-3 w-3 mr-1" />
@@ -360,7 +542,7 @@ export default function Admin() {
                       <Badge 
                         key={role} 
                         className={`${roleColors[role]} cursor-pointer hover:opacity-70`}
-                        onClick={() => toggleRole(user.id, role, true)}
+                        onClick={() => toggleRole(user, role)}
                       >
                         {ROLES.find(r => r.value === role)?.label}
                         <X className="h-3 w-3 ml-1" />
@@ -375,7 +557,7 @@ export default function Admin() {
                         key={role.value}
                         size="sm"
                         variant="ghost"
-                        onClick={() => toggleRole(user.id, role.value, false)}
+                        onClick={() => toggleRole(user, role.value)}
                         className="text-xs h-7 text-muted-foreground"
                       >
                         + {role.label}
