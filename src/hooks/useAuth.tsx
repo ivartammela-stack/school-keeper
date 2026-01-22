@@ -11,6 +11,8 @@ import {
   createUser,
   updateUser,
   getUserMemberships,
+  getSchools,
+  requestSchoolMembership,
   getSchool,
   setActiveSchool,
   initializeGlobalCatalogs,
@@ -90,7 +92,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             userProfile = await getUser(firebaseUser.uid);
           }
 
-          const memberList = await getUserMemberships(firebaseUser.uid);
+          let memberList = await getUserMemberships(firebaseUser.uid);
+
+          if (memberList.length === 0) {
+            try {
+              const schoolsAll = await getSchools();
+              if (schoolsAll.length === 1) {
+                await requestSchoolMembership(schoolsAll[0].id, {
+                  id: firebaseUser.uid,
+                  email: firebaseUser.email || null,
+                  full_name: firebaseUser.displayName || null,
+                  avatar_url: firebaseUser.photoURL || null,
+                });
+                memberList = await getUserMemberships(firebaseUser.uid);
+              }
+            } catch (error) {
+              logger.warn('Failed to auto-request membership', error);
+            }
+          }
           setMemberships(memberList);
 
           const activeSchoolId = userProfile?.active_school_id || null;
