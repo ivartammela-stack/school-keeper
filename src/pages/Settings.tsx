@@ -68,6 +68,8 @@ export default function Settings() {
   const [ticketEmailEnabled, setTicketEmailEnabled] = useState(true);
   const [ticketEmailRoles, setTicketEmailRoles] = useState<AppRole[]>(['admin']);
   const [sendingTestPush, setSendingTestPush] = useState(false);
+  const [pushDiag, setPushDiag] = useState<any | null>(null);
+  const [runningPushDiag, setRunningPushDiag] = useState(false);
 
   useEffect(() => {
     if (schoolId) {
@@ -119,6 +121,35 @@ export default function Settings() {
       toast.error(message);
     } finally {
       setSendingTestPush(false);
+    }
+  };
+
+  const runPushDiag = async () => {
+    setRunningPushDiag(true);
+    try {
+      const out: any = {
+        https: location.protocol === 'https:',
+        notif: 'Notification' in window,
+        perm: ('Notification' in window) ? Notification.permission : 'no-api',
+        sw: 'serviceWorker' in navigator,
+        regs: [],
+        controller: !!navigator.serviceWorker?.controller,
+      };
+
+      if (out.sw) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        out.regs = regs.map((r) => ({
+          scope: r.scope,
+          active: !!r.active,
+          scriptURL: r.active?.scriptURL || null,
+        }));
+      }
+
+      setPushDiag(out);
+    } catch (error: any) {
+      setPushDiag({ error: error?.message || String(error) });
+    } finally {
+      setRunningPushDiag(false);
     }
   };
 
@@ -431,6 +462,21 @@ export default function Settings() {
                   {sendingTestPush ? 'Saadan...' : 'Saada test'}
                 </Button>
               </div>
+              <div className="flex items-center justify-between">
+                <Label className="text-base">Push diagnostika</Label>
+                <Button
+                  variant="outline"
+                  onClick={runPushDiag}
+                  disabled={runningPushDiag}
+                >
+                  {runningPushDiag ? 'Kontrollin...' : 'Näita'}
+                </Button>
+              </div>
+              {pushDiag && (
+                <pre className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap">
+                  {JSON.stringify(pushDiag, null, 2)}
+                </pre>
+              )}
               {token && (
                 <div className="text-xs text-muted-foreground">
                   Push token salvestatud.
