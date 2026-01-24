@@ -38,6 +38,7 @@ export async function initializePushNotifications(userId: string) {
           user_id: userId,
           token: token.value,
           platform,
+          browser: null,
         });
         logger.info('Push token saved successfully');
       } catch (error) {

@@ -13,17 +13,21 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(uid));
     }
 
+    function memberPath(schoolId, uid) {
+      return /databases/$(database)/documents/schools/$(schoolId)/members/$(uid);
+    }
+
     function memberDoc(schoolId, uid) {
-      return get(/databases/$(database)/documents/schools/$(schoolId)/members/$(uid));
+      return get(memberPath(schoolId, uid));
     }
 
     function isAnyMember(schoolId) {
-      return signedIn() && exists(memberDoc(schoolId, request.auth.uid));
+      return signedIn() && exists(memberPath(schoolId, request.auth.uid));
     }
 
     function isMember(schoolId) {
       return signedIn()
-        && exists(memberDoc(schoolId, request.auth.uid))
+        && exists(memberPath(schoolId, request.auth.uid))
         && memberDoc(schoolId, request.auth.uid).data.status == 'active';
     }
 
@@ -41,7 +45,25 @@ service cloud.firestore {
       allow delete: if isSelf(uid);
 
       match /pushTokens/{tokenId} {
-        allow read, write: if isSelf(uid);
+        allow read: if isSelf(uid);
+        allow create, update: if isSelf(uid)
+          && request.resource.data.keys().hasOnly([
+            'token',
+            'platform',
+            'browser',
+            'enabled',
+            'created_at',
+            'updated_at',
+            'last_seen_at',
+            'last_success_at',
+            'last_error_code',
+            'user_id'
+          ])
+          && request.resource.data.token is string
+          && request.resource.data.token.size() > 20
+          && request.resource.data.platform in ['web', 'android', 'ios']
+          && request.resource.data.enabled is bool;
+        allow delete: if isSelf(uid);
       }
     }
 
@@ -49,6 +71,16 @@ service cloud.firestore {
     match /catalogs/global/{collection}/{docId} {
       allow read: if signedIn();
       allow write: if signedIn();
+    }
+
+    // COLLECTION GROUP: members (for getUserMemberships query)
+    match /{path=**}/members/{docId} {
+      allow read: if signedIn() && request.auth.uid == resource.data.user_id;
+    }
+
+    // COLLECTION GROUP: pushTokens (for getPushTokenStats - admin only via Cloud Functions)
+    match /{path=**}/pushTokens/{tokenId} {
+      allow read: if signedIn();
     }
 
     // SCHOOLS

@@ -38,6 +38,7 @@ import type {
   PushToken,
   TicketStatus,
 } from './firebase-types';
+import { sha256Hex } from './crypto';
 
 if (!db) {
   throw new Error('Firestore not initialized');
@@ -101,7 +102,7 @@ export async function setActiveSchool(userId: string, schoolId: string | null): 
 
 export async function getUserMemberships(userId: string): Promise<SchoolMember[]> {
   const membersRef = collectionGroup(db!, 'members');
-  const q = query(membersRef, where(documentId(), '==', userId));
+  const q = query(membersRef, where('user_id', '==', userId));
   const snapshot = await getDocs(q);
 
   return snapshot.docs.map((d) => {
@@ -736,31 +737,28 @@ export async function getAuditLogs(
 export async function savePushToken(
   tokenData: Omit<PushToken, 'id' | 'created_at' | 'updated_at'>
 ): Promise<void> {
-  const tokensRef = collection(db!, 'users', tokenData.user_id, 'pushTokens');
-  const q = query(tokensRef, where('token', '==', tokenData.token));
-  const existing = await getDocs(q);
+  const tokenHash = await sha256Hex(tokenData.token);
+  const docRef = doc(db!, 'users', tokenData.user_id, 'pushTokens', tokenHash);
+  const existing = await getDoc(docRef);
 
-  if (existing.empty) {
-    await addDoc(tokensRef, {
+  await setDoc(
+    docRef,
+    {
       ...tokenData,
-      created_at: serverTimestamp(),
+      enabled: true,
+      last_seen_at: serverTimestamp(),
+      created_at: existing.exists() ? existing.data()?.created_at || serverTimestamp() : serverTimestamp(),
       updated_at: serverTimestamp(),
-    });
-  } else {
-    await updateDoc(existing.docs[0].ref, {
-      updated_at: serverTimestamp(),
-    });
-  }
+    },
+    { merge: true }
+  );
 }
 
 export async function deletePushToken(userId: string, token: string): Promise<void> {
   const tokensRef = collection(db!, 'users', userId, 'pushTokens');
-  const q = query(tokensRef, where('token', '==', token));
-  const snapshot = await getDocs(q);
-
-  const batch = writeBatch(db!);
-  snapshot.docs.forEach((d) => batch.delete(d.ref));
-  await batch.commit();
+  const tokenHash = await sha256Hex(token);
+  const docRef = doc(tokensRef, tokenHash);
+  await deleteDoc(docRef);
 }
 
 export async function getPushTokenStats(): Promise<{

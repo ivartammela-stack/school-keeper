@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
   PushNotifications,
@@ -22,11 +22,22 @@ const registerTokenWithBackend = async (
       user_id: userId,
       token,
       platform,
+      browser: platform === 'web' ? detectBrowser() : null,
     });
     console.log('Push token registered with backend');
   } catch (error) {
     console.error('Failed to register push token:', error);
   }
+};
+
+const detectBrowser = (): string => {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('chrome') && !ua.includes('edg')) return 'chrome';
+  if (ua.includes('edg')) return 'edge';
+  if (ua.includes('safari') && !ua.includes('chrome')) return 'safari';
+  if (ua.includes('firefox')) return 'firefox';
+  return 'unknown';
 };
 
 const getPlatform = (): 'android' | 'ios' | 'web' => {
@@ -56,6 +67,57 @@ export const usePushNotifications = () => {
 
     registerTokenWithBackend(token, getPlatform(), userId);
   }, [token, userId]);
+
+  const registerWebPush = useCallback(async (forcePrompt: boolean) => {
+    if (!app) return false;
+    const supported = await isMessagingSupported();
+    if (!supported || !('serviceWorker' in navigator)) return false;
+
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || '';
+    if (!vapidKey) {
+      toast.error('VAPID võti puudub');
+      return false;
+    }
+
+    if (Notification.permission !== 'granted') {
+      if (!forcePrompt) return false;
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast.error('Push teavitused keelatud');
+        return false;
+      }
+    }
+
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+    const messaging = getMessaging(app);
+    const webToken = await getToken(messaging, {
+      vapidKey,
+      serviceWorkerRegistration: registration,
+    });
+
+    if (webToken) {
+      setToken(webToken);
+      if (userId) {
+        await registerTokenWithBackend(webToken, 'web', userId);
+      }
+    }
+
+    if (!webListenerReady.current) {
+      onMessage(messaging, (payload) => {
+        const title = payload.notification?.title || 'Teavitus';
+        const body = payload.notification?.body || '';
+        if (Notification.permission === 'granted') {
+          new Notification(title, { body, icon: '/icons/icon-192.webp' });
+        } else {
+          toast(title, { description: body });
+        }
+      });
+      webListenerReady.current = true;
+    }
+
+    return true;
+  }, [userId]);
 
   useEffect(() => {
     const isNative = Capacitor.isNativePlatform();
@@ -158,57 +220,7 @@ export const usePushNotifications = () => {
     return () => {
       PushNotifications.removeAllListeners();
     };
-  }, [userId]);
-
-  const registerWebPush = async (forcePrompt: boolean) => {
-    if (!app) return false;
-    const supported = await isMessagingSupported();
-    if (!supported || !('serviceWorker' in navigator)) return false;
-
-    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || '';
-    if (!vapidKey) {
-      toast.error('VAPID võti puudub');
-      return false;
-    }
-
-    if (Notification.permission !== 'granted') {
-      if (!forcePrompt) return false;
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        toast.error('Push teavitused keelatud');
-        return false;
-      }
-    }
-
-    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-    const messaging = getMessaging(app);
-    const webToken = await getToken(messaging, {
-      vapidKey,
-      serviceWorkerRegistration: registration,
-    });
-
-    if (webToken) {
-      setToken(webToken);
-      if (userId) {
-        await registerTokenWithBackend(webToken, 'web', userId);
-      }
-    }
-
-    if (!webListenerReady.current) {
-      onMessage(messaging, (payload) => {
-        const title = payload.notification?.title || 'Teavitus';
-        const body = payload.notification?.body || '';
-        if (Notification.permission === 'granted') {
-          new Notification(title, { body, icon: '/icons/icon-192.webp' });
-        } else {
-          toast(title, { description: body });
-        }
-      });
-      webListenerReady.current = true;
-    }
-
-    return true;
-  };
+  }, [userId, registerWebPush]);
 
   const requestPermission = async () => {
     if (!isSupported) {

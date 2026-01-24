@@ -125,7 +125,7 @@ exports.deleteUserV1 = functions
     await userRef.delete();
 
     const memberSnap = await db.collectionGroup('members')
-      .where(FieldPath.documentId(), '==', userId)
+      .where('user_id', '==', userId)
       .get();
     if (!memberSnap.empty) {
       const batch = db.batch();
@@ -268,7 +268,9 @@ exports.onTicketCreated = functions
           recipientUserIds.map(async (uid) => {
             const tokenSnap = await db.collection('users').doc(uid).collection('pushTokens').get();
             tokenSnap.forEach((doc) => {
-              const token = doc.data()?.token;
+              const data = doc.data() || {};
+              if (data.enabled === false) return;
+              const token = data.token;
               if (token) tokens.add(token);
             });
           })
@@ -284,28 +286,42 @@ exports.onTicketCreated = functions
               tokens: batchTokens,
               notification: { title, body },
               data: dataPayload,
+              webpush: {
+                notification: {
+                  title,
+                  body,
+                  icon: '/icons/icon-192.webp',
+                },
+                fcmOptions: {
+                  link: dataPayload.ticket_id ? `/my-tickets?ticket=${dataPayload.ticket_id}` : '/work',
+                },
+              },
             });
 
             const invalidTokens = [];
             response.responses.forEach((res, index) => {
-              if (!res.success) {
-                const code = res.error?.code || '';
-                if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
-                  invalidTokens.push(batchTokens[index]);
-                }
-              }
-            });
+        if (!res.success) {
+          const code = res.error?.code || '';
+          if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+            invalidTokens.push(batchTokens[index]);
+          }
+        }
+      });
 
-            for (const invalidToken of invalidTokens) {
-              const tokenSnap = await db.collectionGroup('pushTokens')
-                .where('token', '==', invalidToken)
-                .get();
-              if (!tokenSnap.empty) {
-                const batch = db.batch();
-                tokenSnap.docs.forEach((doc) => batch.delete(doc.ref));
-                await batch.commit();
-              }
-            }
+      for (const invalidToken of invalidTokens) {
+        const tokenSnap = await db.collectionGroup('pushTokens')
+          .where('token', '==', invalidToken)
+          .get();
+        if (!tokenSnap.empty) {
+          const batch = db.batch();
+          tokenSnap.docs.forEach((doc) => batch.update(doc.ref, {
+            enabled: false,
+            last_error_code: 'invalid-token',
+            updated_at: FieldValue.serverTimestamp(),
+          }));
+          await batch.commit();
+        }
+      }
           }
         }
       }
@@ -346,7 +362,9 @@ exports.sendTestPush = onCall(
     }
 
     const userId = request.auth.uid;
-    const tokensSnap = await db.collection('users').doc(userId).collection('pushTokens').get();
+    const tokensSnap = await db.collection('users').doc(userId).collection('pushTokens')
+      .where('enabled', '==', true)
+      .get();
 
     if (tokensSnap.empty) {
       throw new HttpsError('failed-precondition', 'No push tokens registered.');
@@ -358,32 +376,70 @@ exports.sendTestPush = onCall(
       if (token) tokens.push(token);
     });
 
+    console.log(`Sending test push to ${tokens.length} tokens`);
+
     const messaging = getMessaging();
     const response = await messaging.sendEachForMulticast({
       tokens,
       notification: { title: 'Testteavitus', body: 'Push-teavitus on korras.' },
       data: { type: 'test_push' },
+      webpush: {
+        notification: {
+          title: 'Testteavitus',
+          body: 'Push-teavitus on korras.',
+          icon: '/icons/icon-192.webp',
+        },
+        fcmOptions: {
+          link: '/',
+        },
+      },
     });
 
+    console.log(`FCM response: success=${response.successCount}, failure=${response.failureCount}`);
+
     const invalidTokens = [];
+    const successTokens = [];
     response.responses.forEach((res, index) => {
       if (!res.success) {
         const code = res.error?.code || '';
+        console.log(`Token ${index} failed: ${code} - ${res.error?.message}`);
         if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
           invalidTokens.push(tokens[index]);
         }
+      } else {
+        successTokens.push(tokens[index]);
       }
     });
 
-    for (const invalidToken of invalidTokens) {
-      const tokenSnap = await db.collectionGroup('pushTokens')
-        .where('token', '==', invalidToken)
-        .get();
-      if (!tokenSnap.empty) {
-        const batch = db.batch();
-        tokenSnap.docs.forEach((doc) => batch.delete(doc.ref));
-        await batch.commit();
-      }
+    if (invalidTokens.length > 0) {
+      const userTokensRef = db.collection('users').doc(userId).collection('pushTokens');
+      const batch = db.batch();
+      tokensSnap.docs.forEach((doc) => {
+        const token = doc.data()?.token;
+        if (token && invalidTokens.includes(token)) {
+          batch.update(doc.ref, {
+            enabled: false,
+            last_error_code: 'invalid-token',
+            updated_at: FieldValue.serverTimestamp(),
+          });
+        }
+      });
+      await batch.commit();
+    }
+
+    if (successTokens.length > 0) {
+      const userTokensRef = db.collection('users').doc(userId).collection('pushTokens');
+      const batch = db.batch();
+      tokensSnap.docs.forEach((doc) => {
+        const token = doc.data()?.token;
+        if (token && successTokens.includes(token)) {
+          batch.update(doc.ref, {
+            last_success_at: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp(),
+          });
+        }
+      });
+      await batch.commit();
     }
 
     return { ok: true, success: response.successCount, failed: response.failureCount };

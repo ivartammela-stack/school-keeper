@@ -120,6 +120,11 @@ export interface PushToken {
   user_id: string;
   token: string;
   platform: 'android' | 'ios' | 'web';
+  browser?: string | null;
+  enabled?: boolean;
+  last_seen_at?: Date;
+  last_success_at?: Date;
+  last_error_code?: string | null;
   created_at: Date;
   updated_at: Date;
 }
